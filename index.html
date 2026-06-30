@@ -211,7 +211,7 @@ table.rp-table td.out{font-weight:700;}
     <div class="patient-list" id="patientList"></div>
     <div class="sidebar-foot">
       <button class="btn" id="btnNewPatient">+ Nuevo paciente</button>
-      <div style="text-align:center;font-size:10px;color:var(--gray-3);margin-top:8px;">build 2026-06-25-r10</div>
+      <div style="text-align:center;font-size:10px;color:var(--gray-3);margin-top:8px;">build 2026-06-25-r11</div>
     </div>
   </div>
   <div class="main" id="main"></div>
@@ -1043,49 +1043,44 @@ const VoiceEngine = (()=>{
 
   /* Sinónimos/variantes habladas para cada campo. No es necesario decir el nombre
      exacto como aparece en la app: cualquiera de estas frases sirve. */
+  /* Aliases basados en la voz REAL del médico (dictado natural en orden de lectura de la app).
+     Cada campo tiene sus variantes exactas tal como las pronuncia. */
   const VOICE_ALIASES = {
+    // Datos del paciente
+    p_medsol: ['grupo solicitante','médico solicitante','solicitante','médico que solicita'],
+    p_motivo: ['motivo del estudio','motivo'],
+    p_peso: ['peso','tesesso','talla y peso','peso del paciente'],
+    p_talla: ['talla','altura del paciente'],
+    p_fc: ['frecuencia card[ií]aca','frecuencia','pulso'],
+    p_vci: ['vena cava inferior'],
     // Aorta
-    ao_anillo: ['anillo a[oó]rtico','anillo de la a[oó]rtica','anillo'],
-    ao_raiz: ['ra[ií]z a[oó]rtica','ra[ií]z de la aorta','aorta sinusal','seno de valsalva','raiz aortica'],
-    ao_ust: ['uni[oó]n sinotubular','uni[oó]n senotubular'],
+    ao_anillo: ['anillo a[oó]rtico','anillo'],
+    ao_raiz: ['ra[ií]z a[oó]rtica','raíz aórtica','raiz aortica','aorta sinusal','seno de valsalva'],
+    ao_ust: ['uni[oó]n sino tubular','uni[oó]n sinotubular','sino tubular'],
     ao_asc: ['aorta ascendente'],
-    // Aurícula izquierda
-    ai_diam: ['di[aá]metro auricular izquierdo','di[aá]metro de aur[ií]cula izquierda','di[aá]metro de ai','ai di[aá]metro','aur[ií]cula izquierda(?!\\s*(?:volumen|indexad))','\\bai\\b(?!\\s*(?:volumen|indexad))'],
-    ai_vol: ['volumen total de aur[ií]cula izquierda','volumen de aur[ií]cula izquierda(?!\\s*indexad)','volumen auricular izquierdo(?!\\s*indexad)','volumen de ai(?!\\s*indexad)','ai volumen(?!\\s*indexad)'],
-    ai_voli: ['volumen indexado de aur[ií]cula izquierda','volumen auricular izquierdo indexado','volumen de aur[ií]cula izquierda indexado','ai indexada','ai indexado','volumen indexado de ai','ai volumen indexado','[ií]ndice de volumen auricular','volumen auricular indexado'],
-    // Ventrículo izquierdo — aliases ampliados
-    vi_siv: ['septum interventricular','septum','tabique interventricular','espesor del septum','espesor septal'],
+    // Aurícula izquierda — exactamente como las dice: "auricular izquierda diámetro" etc.
+    ai_diam: ['auricular izquierda di[aá]metro','aur[ií]cula izquierda di[aá]metro','di[aá]metro auricular izquierdo','di[aá]metro de ai','ai di[aá]metro','\bai\b(?!\s*(?:volumen|indexad))'],
+    ai_vol: ['auricular izquierda volumen(?!\s*indexad)','aur[ií]cula izquierda volumen(?!\s*indexad)','volumen auricular izquierdo(?!\s*indexad)','volumen de ai(?!\s*indexad)'],
+    ai_voli: ['auricular izquierda volumen indexado','aur[ií]cula izquierda volumen indexado','volumen indexado de aur[ií]cula izquierda','volumen indexado de ai','ai indexada','ai indexado','volumen auricular indexado'],
+    // Ventrículo izquierdo — como las dice: "diámetro diabólico LVI", "diámetro sistólico del VI"
+    vi_siv: ['septum interventricular','septum','tabique interventricular','espesor septal','espesor del septum'],
     vi_pp: ['pared posterior','espesor de pared posterior','espesor parietal'],
-    vi_ddvi: ['ddvi','di[aá]metro diast[oó]lico del ventr[ií]culo izquierdo','di[aá]metro diast[oó]lico final','di[aá]metro de fin de di[aá]stole','ventr[ií]culo izquierdo en di[aá]stole','vi en di[aá]stole','di[aá]metro diastólico'],
-    vi_dsvi: ['dsvi','di[aá]metro sist[oó]lico del ventr[ií]culo izquierdo','di[aá]metro sist[oó]lico final','di[aá]metro de fin de s[ií]stole','ventr[ií]culo izquierdo en s[ií]stole','vi en s[ií]stole','di[aá]metro sist[oó]lico'],
-    vi_vtd: ['volumen telediast[oó]lico','volumen de fin de di[aá]stole','vtd'],
-    vi_vts: ['volumen telesist[oó]lico','volumen de fin de s[ií]stole','vts'],
-    vi_fevi: ['fracci[oó]n de eyecci[oó]n','fey','fevi','fraccion de eyeccion','fe'],
+    vi_ddvi: ['di[aá]metro diab[oó]lico lvi','di[aá]metro diast[oó]lico lvi','di[aá]metro diast[oó]lico del vi','ddvi','di[aá]metro diast[oó]lico final','di[aá]metro de fin de di[aá]stole','vi en di[aá]stole','di[aá]metro diastólico'],
+    vi_dsvi: ['di[aá]metro sist[oó]lico del vi','di[aá]metro sist[oó]lico lvi','dsvi','di[aá]metro sist[oó]lico final','vi en s[ií]stole','di[aá]metro sist[oó]lico'],
+    vi_vtd: ['volumen telediast[oó]lico por simpson','volumen telediastólico','volumen de fin de di[aá]stole','vtd'],
+    vi_vts: ['volumen telesist[oó]lico por simpson','volumen telesistólico','volumen de fin de s[ií]stole','vts'],
+    // FEVI — como la pronuncia: "FEI", "Faye por Simpson", "Faye por Texas ball"
+    vi_fevi: ['faye por simpson','faye por texas ball','faye por teichholz','fei','fay','fevi','fracci[oó]n de eyecci[oó]n','fraccion de eyeccion','fey'],
     vi_gls: ['gls','strain longitudinal global','strain global','deformaci[oó]n longitudinal'],
-    vi_masai: ['masa indexada','[ií]ndice de masa','masa del ventr[ií]culo izquierdo indexada','masa indexada del vi'],
-    // VD / AD / pulmonar
-    vd_diam: ['ventr[ií]culo derecho basal','di[aá]metro basal del ventr[ií]culo derecho','di[aá]metro del ventr[ií]culo derecho','vd di[aá]metro'],
-    vd_tapse: ['tapse'],
-    vd_fac: ['fac','fracci[oó]n de acortamiento del [aá]rea','fracci[oó]n de acortamiento'],
-    vd_s: ['s prima','onda s prima','velocidad s prima','s tisular','onda s'],
-    ad_area: ['[aá]rea de aur[ií]cula derecha','aur[ií]cula derecha [aá]rea','ad [aá]rea'],
-    pul_psap: ['psap','presi[oó]n sist[oó]lica de arteria pulmonar','presi[oó]n pulmonar','presion pulmonar'],
-    pul_vci: ['vci','vena cava inferior'],
-    // Función diastólica
-    d_e: ['onda e mitral','onda e','velocidad e','pico e','flujo e','velocidad de la onda e','\\be\\b(?!\\s*prima)'],
-    d_a: ['onda a mitral','onda a','velocidad a','pico a','velocidad de la onda a'],
-    d_eseptal: ["e prima septal","e' septal","onda e prima septal","e tisular septal","e prima del septum"],
-    d_elateral: ["e prima lateral","e' lateral","onda e prima lateral","e tisular lateral","e prima de la pared lateral"],
-    d_dt: ['tiempo de desaceleraci[oó]n','desaceleraci[oó]n de la onda e','dt'],
-    d_ivrt: ['ivrt','triv','tiempo de relajaci[oó]n isovolum[eé]trica'],
-    d_vtr: ['vmax tricusp[ií]dea','velocidad de regurgitaci[oó]n tricusp[ií]dea','vmax tr','jet tricusp[ií]deo','velocidad jet tricuspideo'],
-    // Válvula aórtica / TSVI
-    tsvi_diam: ['di[aá]metro del tsvi','tsvi di[aá]metro','di[aá]metro del tracto de salida','tracto de salida'],
-    tsvi_vmax: ['vmax del tsvi','velocidad del tracto de salida'],
-    tsvi_gradm: ['gradiente del tsvi','gradiente del tracto de salida'],
-    vao_vmax: ['vmax a[oó]rtico','velocidad m[aá]xima a[oó]rtica','vmax de la v[aá]lvula a[oó]rtica','velocidad aortica maxima'],
-    vao_gradm: ['gradiente medio a[oó]rtico','gradiente medio de la v[aá]lvula a[oó]rtica','gradiente medio aortico'],
-    vao_area: ['[aá]rea valvular a[oó]rtica','[aá]rea a[oó]rtica','area de la valvula aortica'],
+    vi_masai: ['masa indexada','[ií]ndice de masa','masa indexada del vi'],
+    // TSVI — como la dice: "diámetro TCBI", "velocidad máxima TCBI", "gradiente TCBI"
+    tsvi_diam: ['di[aá]metro tcbi','di[aá]metro del tsvi','di[aá]metro del tracto de salida','tracto de salida','tcbi di[aá]metro'],
+    tsvi_vmax: ['velocidad m[aá]xima tcbi','vmax tcbi','velocidad tcbi','velocidad del tracto de salida'],
+    tsvi_gradm: ['gradiente tcbi','gradiente del tsvi','gradiente del tracto de salida'],
+    // Válvula aórtica — "válvula órtica"
+    vao_vmax: ['velocidad m[aá]xima de v[aá]lvula [oó]rtica','velocidad m[aá]xima a[oó]rtica','vmax a[oó]rtico','vmax de la v[aá]lvula','velocidad aortica','velocidad aortica maxima'],
+    vao_gradm: ['gradiente medio de v[aá]lvula [oó]rtica','gradiente medio a[oó]rtico','gradiente medio de la v[aá]lvula','gradiente medio'],
+    vao_area: ['[aá]rea valvular de v[aá]lvula [oó]rtica','[aá]rea valvular a[oó]rtica','[aá]rea a[oó]rtica','area de la valvula aortica'],
     // Válvula mitral
     vmi_gradm: ['gradiente medio mitral','gradiente de la v[aá]lvula mitral','gradiente mitral'],
     vmi_area: ['[aá]rea valvular mitral','[aá]rea mitral','area de la valvula mitral'],
@@ -1093,6 +1088,23 @@ const VoiceEngine = (()=>{
     vmi_pisa: ['radio de pisa','pisa'],
     vmi_eroa: ['eroa','[aá]rea de orificio regurgitante'],
     vmi_vreg: ['volumen regurgitante'],
+    // Función diastólica — "función electrónica" / "onda e, onda a, e prima central"
+    d_e: ['onda e mitral','onda e','velocidad e','pico e','\be\b(?!\s*prima)'],
+    d_a: ['onda a mitral','onda a','velocidad a','pico a'],
+    d_eseptal: ['e prima central','e prima septal','e\s*prima sep','onda e prima septal','e tisular septal','e prima del septum'],
+    d_elateral: ['e prima lateral','onda e prima lateral','e tisular lateral'],
+    d_dt: ['tiempo desaceleraci[oó]n de t','tiempo de desaceleraci[oó]n','desaceleraci[oó]n de la onda e','\bdt\b'],
+    d_ivrt: ['ivrt','triv','tiempo de relajaci[oó]n'],
+    d_vtr: ['velocidad m[aá]xima t r','velocidad m[aá]xima tr','vmax tr','vmax tricusp[ií]dea','jet tricusp[ií]deo'],
+    // Cavidades derechas — "b de diámetro basal", "onda s"
+    vd_diam: ['b de di[aá]metro basal','di[aá]metro basal','di[aá]metro basal del ventr[ií]culo derecho','di[aá]metro del ventr[ií]culo derecho','vd di[aá]metro'],
+    vd_tapse: ['tapse'],
+    vd_fac: ['fac','fracci[oó]n de acortamiento'],
+    vd_s: ['onda s','velocidad s','s prima','s tisular'],
+    ad_area: ['aur[ií]cula derecha por [aá]rea','[aá]rea de aur[ií]cula derecha','aur[ií]cula derecha [aá]rea','ad [aá]rea'],
+    // Circulación pulmonar — "BCP", "BCI"
+    pul_psap: ['psap','presi[oó]n sist[oó]lica de arteria pulmonar','presi[oó]n pulmonar','bcp','presion pulmonar'],
+    pul_vci: ['bci','vci','vena cava inferior'],
   };
   const UNITS = '(?:mil[ií]metros|mm\\b|por\\s*ciento|%|cent[ií]metros|cm2|cm²|cm\\b|mililitros|ml\\/m|ml\\b|mmhg|metros por segundo|m\\/s|milisegundos|ms\\b|gramos por metro|g\\/m|gramos|g\\b)';
   function buildAliasRegex(alias){
@@ -1133,11 +1145,40 @@ const VoiceEngine = (()=>{
         if(n!==null){ hits.push({field:p.field, value:n}); claimed.add(p.field); }
       }
     });
-    ['mitral','a[oó]rtica','tricusp[ií]dea','pulmonar'].forEach((w,idx)=>{
-      const map=['vmi_insuf','vao_insuf','vtr_insuf','vpu_insuf'];
-      const m=t.match(new RegExp('insuficiencia '+w+'\\s+(leve|moderada|severa)','i'));
-      if(m) hits.push({field:map[idx], value:m[1][0].toUpperCase()+m[1].slice(1)});
+    /* Insuficiencias valvulares — con variantes de pronunciación */
+    [
+      {words:['mitral','mitr[ao]l'], field:'vmi_insuf'},
+      {words:['a[oó]rtica','[oó]rtica','aortica'], field:'vao_insuf'},
+      {words:['tricusp[ií]dea','tricuspidia','tricúspide'], field:'vtr_insuf'},
+      {words:['pulmonar'], field:'vpu_insuf'},
+    ].forEach(({words, field})=>{
+      words.forEach(w=>{
+        const m=t.match(new RegExp('insuficiencia\\s+'+w+'\\s+(leve|moderada(?:\\s*severa)?|severa)','i'));
+        if(m){
+          let v = normalizeAccents(m[1].trim().toLowerCase());
+          if(v==='moderada severa'||v==='moderada-severa') v='Moderada-Severa';
+          else v = v.charAt(0).toUpperCase()+v.slice(1);
+          hits.push({field, value:v});
+        }
+      });
     });
+    /* Morfología valvular */
+    const morfAo = t.match(/(?:válvula\s+)?(?:[oó]rtica|a[oó]rtica)\s+(tric[uú]spide|bic[uú]spide|pr[oó]tesis)/i);
+    if(morfAo) hits.push({field:'vao_morf', value: morfAo[1].charAt(0).toUpperCase()+morfAo[1].slice(1)});
+    const morfMi = t.match(/(?:válvula\s+)?mitral\s+(prolapso|calcificaci[oó]n|reum[aá]tica|pr[oó]tesis|normal)/i);
+    if(morfMi) hits.push({field:'vmi_morf', value: morfMi[1].charAt(0).toUpperCase()+morfMi[1].slice(1)});
+    /* Ritmo cardíaco */
+    if(/sinusal/i.test(t)) hits.push({field:'p_ritmo', value:'Sinusal'});
+    else if(/fibrilaci[oó]n auricular/i.test(t)) hits.push({field:'p_ritmo', value:'Fibrilación auricular'});
+    else if(/fl[uú]ter auricular/i.test(t)) hits.push({field:'p_ritmo', value:'Flutter auricular'});
+    else if(/marcapasos/i.test(t) && /ritmo/i.test(t)) hits.push({field:'p_ritmo', value:'Ritmo de marcapasos'});
+    /* Ventana acústica */
+    if(/ventana.*buena|buena.*ventana/i.test(t)) hits.push({field:'p_ventana', value:'Buena'});
+    else if(/ventana.*regular|regular.*ventana/i.test(t)) hits.push({field:'p_ventana', value:'Regular'});
+    else if(/ventana.*limitada|limitada.*ventana/i.test(t)) hits.push({field:'p_ventana', value:'Limitada'});
+    /* Método de FEVI — "Faye por Simpson mi plano" / "Faye por Texas ball" */
+    if(/faye?\s+por\s+simpson|simpson\s+bi\s*plano|simpson biplano/i.test(t)) hits.push({field:'metodo_fevi', value:'Simpson biplano'});
+    else if(/faye?\s+por\s+tex[ao]s?\s+ball|teichholz|texas ball/i.test(t)) hits.push({field:'metodo_fevi', value:'Teichholz'});
     const tNorm = normalizeAccents(t);
     HALLAZGOS_LIST.forEach(h=>{ if(tNorm.includes(normalizeAccents(h.toLowerCase()))) hits.push({field:'__hallazgo', value:h}); });
     return hits;
