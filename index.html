@@ -161,14 +161,25 @@ button{font-family:inherit;}
 /* campo escuchando: borde azul animado + fondo suave */
 .fitem input.field-listening{border-color:#1B6B6B !important;background:#f0fafa !important;
   box-shadow:0 0 0 3px rgba(27,107,107,.15);}
-/* contenedor posición para el mic inline */
-.fitem-wrap{position:relative;}
-.fitem-mic{position:absolute;right:6px;top:50%;transform:translateY(-50%);
-  width:24px;height:24px;border:none;background:none;cursor:pointer;font-size:15px;
-  display:none;align-items:center;justify-content:center;opacity:.4;}
-.fitem-wrap:focus-within .fitem-mic{display:flex;}
-.fitem-mic.active{opacity:1;animation:micPulse .8s infinite alternate;}
-@keyframes micPulse{from{opacity:.6;}to{opacity:1;}}
+
+/* Barra de modo dictado continuo */
+#contDictBar{
+  display:none;position:fixed;bottom:0;left:0;right:0;z-index:200;
+  background:var(--ink);color:#fff;padding:10px 16px;
+  align-items:center;justify-content:space-between;gap:10px;
+  box-shadow:0 -2px 12px rgba(0,0,0,.2);
+}
+#contDictBar.active{display:flex;}
+#contDictStatus{font-size:12px;display:flex;align-items:center;gap:8px;flex:1;min-width:0;}
+#contDictDot{width:10px;height:10px;border-radius:50%;background:#aaa;flex-shrink:0;transition:background .2s;}
+#contDictDot.listening{background:#4caf50;animation:dotPulse .8s infinite alternate;}
+#contDictDot.got{background:#4caf50;}
+@keyframes dotPulse{from{opacity:.5;}to{opacity:1;}}
+#contDictText{font-size:12px;opacity:.8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+#contDictStop{flex-shrink:0;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;
+  border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;}
+/* Campo activo en modo continuo: borde verde */
+.field-cont-active{border-color:#4caf50 !important;background:#f0fff4 !important;}
 
 .chip-row{display:flex;flex-wrap:wrap;gap:6px;}
 .chip{border:1px solid var(--line);border-radius:14px;padding:5px 11px;font-size:11.5px;cursor:pointer;background:var(--paper);}
@@ -275,7 +286,7 @@ table.rp-table td.out{font-weight:700;}
     <div class="patient-list" id="patientList"></div>
     <div class="sidebar-foot">
       <button class="btn" id="btnNewPatient">+ Nuevo paciente</button>
-      <div style="text-align:center;font-size:10px;color:var(--gray-3);margin-top:8px;">build 2026-06-25-r13</div>
+      <div style="text-align:center;font-size:10px;color:var(--gray-3);margin-top:8px;">build 2026-06-25-r15</div>
     </div>
   </div>
   <div class="main" id="main"></div>
@@ -1849,40 +1860,72 @@ const App = (()=>{
     document.querySelectorAll('[data-field]').forEach(el=>{
       el.addEventListener('input', ()=>{ readFieldsIntoStudy(); handleAutoCalcTrigger(el.dataset.field); applyConditionalVisibility(); debouncedRender(); });
       el.addEventListener('change', ()=>{ readFieldsIntoStudy(); handleAutoCalcTrigger(el.dataset.field); applyConditionalVisibility(); debouncedRender(); });
-      el.addEventListener('focus', ()=> showRefHint(el));
-      el.addEventListener('blur', hideRefHint);
-
-      /* Botón de mic inline: solo en inputs de texto/número, no en selects ni textareas */
-      if(el.tagName==='INPUT'){
-        const wrap = el.parentElement;
-        wrap.style.position = 'relative';
-        const micBtn = document.createElement('button');
-        micBtn.type = 'button';
-        micBtn.textContent = '🎙';
-        micBtn.className = 'fitem-mic';
-        micBtn.title = 'Dictá el valor';
-        micBtn.addEventListener('mousedown', e=>e.preventDefault()); // evitar perder focus del input
-        micBtn.addEventListener('click', (e)=>{
-          e.preventDefault();
-          micBtn.classList.add('active');
-          VoiceEngine.dictateIntoField(el, (val)=>{
-            micBtn.classList.remove('active');
-            readFieldsIntoStudy();
-            handleAutoCalcTrigger(el.dataset.field);
-            applyConditionalVisibility();
-            renderReport();
-            /* avanzar al siguiente campo automáticamente */
-            const allInputs = Array.from(document.querySelectorAll('.form-pane [data-field]'));
-            const idx = allInputs.indexOf(el);
-            if(idx>=0 && idx<allInputs.length-1) allInputs[idx+1].focus();
-          });
-          micBtn.addEventListener('animationend', ()=> micBtn.classList.remove('active'), {once:true});
-        });
-        wrap.appendChild(micBtn);
-      }
+      el.addEventListener('focus', ()=>{
+        showRefHint(el);
+        if(typeof contDictMode !== 'undefined' && contDictMode) startContDictOnField(el);
+      });
+      el.addEventListener('blur', ()=>{
+        hideRefHint();
+      });
     });
     const formPaneEl = document.querySelector('.form-pane');
     if(formPaneEl) formPaneEl.addEventListener('scroll', hideRefHint);
+
+    /* ---- MODO DICTADO CONTINUO ----
+       Se activa una vez y permanece activo hasta que el médico lo detenga.
+       Cada vez que se enfoca un campo, el micrófono arranca solo y llena el campo. */
+    let contDictMode = false;
+    let contDictField = null;
+
+    function setContDictText(txt, listening){
+      const dot = document.getElementById('contDictDot');
+      const text = document.getElementById('contDictText');
+      if(dot){ dot.className = listening ? 'listening' : ''; }
+      if(text) text.textContent = txt;
+    }
+
+    function startContDictOnField(inputEl){
+      if(!contDictMode) return;
+      if(contDictField) contDictField.classList.remove('field-cont-active');
+      contDictField = inputEl;
+      inputEl.classList.add('field-cont-active');
+      const fieldName = FIELD_LABELS_BY_ID[inputEl.dataset.field] || 'Campo';
+      setContDictText('Escuchando "'+fieldName+'"...', true);
+      VoiceEngine.dictateIntoField(inputEl, (val)=>{
+        inputEl.classList.remove('field-cont-active');
+        setContDictText('✓ '+fieldName+': '+val, false);
+        readFieldsIntoStudy();
+        handleAutoCalcTrigger(inputEl.dataset.field);
+        applyConditionalVisibility();
+        renderReport();
+        /* pequeño delay y luego esperar el próximo campo */
+        setTimeout(()=>{ if(contDictMode) setContDictText('Tocá el siguiente campo', false); }, 1200);
+      });
+    }
+
+    const contStop = document.getElementById('contDictStop');
+    if(contStop) contStop.addEventListener('click', ()=>{
+      contDictMode = false;
+      if(contDictField){ contDictField.classList.remove('field-cont-active'); contDictField=null; }
+      const bar = document.getElementById('contDictBar');
+      if(bar) bar.classList.remove('active');
+    });
+
+    /* El botón flotante 🎙 activa/desactiva el modo continuo */
+    const voiceFloatBtn = document.getElementById('voiceBtn');
+    if(voiceFloatBtn){
+      voiceFloatBtn.onclick = ()=>{
+        contDictMode = !contDictMode;
+        voiceFloatBtn.classList.toggle('on', contDictMode);
+        voiceFloatBtn.textContent = contDictMode ? '⏹' : '🎙';
+        const bar = document.getElementById('contDictBar');
+        if(bar) bar.classList.toggle('active', contDictMode);
+        if(contDictMode) setContDictText('Tocá cualquier campo y hablá el valor', false);
+        else {
+          if(contDictField){ contDictField.classList.remove('field-cont-active'); contDictField=null; }
+        }
+      };
+    }
 
     buildChips();
     buildTemplates();
@@ -2254,7 +2297,16 @@ const App = (()=>{
 
 App.init();
 </script>
-<!-- Botón flotante de dictado: acompaña el scroll, difuminado cuando está inactivo -->
+<!-- Barra de modo dictado continuo -->
+<div id="contDictBar">
+  <div id="contDictStatus">
+    <div id="contDictDot"></div>
+    <div id="contDictText">Tocá un campo y hablá el valor</div>
+  </div>
+  <button id="contDictStop">✕ Detener</button>
+</div>
+
+<!-- Botón flotante de dictado general -->
 <button class="voice-float" id="voiceBtn" style="display:none;" title="Dictar mediciones">🎙</button>
 <div class="voice-float-feed" id="voiceFeed"></div>
 
