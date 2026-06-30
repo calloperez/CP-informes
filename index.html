@@ -211,7 +211,7 @@ table.rp-table td.out{font-weight:700;}
     <div class="patient-list" id="patientList"></div>
     <div class="sidebar-foot">
       <button class="btn" id="btnNewPatient">+ Nuevo paciente</button>
-      <div style="text-align:center;font-size:10px;color:var(--gray-3);margin-top:8px;">build 2026-06-25-r9-debug</div>
+      <div style="text-align:center;font-size:10px;color:var(--gray-3);margin-top:8px;">build 2026-06-25-r10</div>
     </div>
   </div>
   <div class="main" id="main"></div>
@@ -1148,7 +1148,7 @@ const VoiceEngine = (()=>{
       alert('El reconocimiento de voz no está disponible en este navegador.\n\niPhone/iPad: funciona en Safari.\nPC/Android: funciona en Chrome.');
       return;
     }
-    if(listening){ recognition.stop(); return; }
+    if(listening){ listening=false; recognition.stop(); return; }
 
     /* Safari en iOS no soporta continuous=true ni interimResults=true: los ignora y se
        detiene solo después de cada frase. La solución es reiniciar automáticamente en
@@ -1901,39 +1901,29 @@ const App = (()=>{
   function handleVoiceToggle(){
     VoiceEngine.toggle(
       (transcript, hits)=>{
-        const feed = document.getElementById('voiceFeed');
-        const log = [];
-        log.push('Texto: "'+transcript.trim()+'"');
-        log.push('Campos encontrados: '+(hits.length ? hits.map(h=>h.field+'='+h.value).join(', ') : 'NINGUNO'));
-
         const filled = [];
         hits.forEach(h=>{
           if(h.field==='__hallazgo'){
             if(!currentStudy.hallazgos.includes(h.value)){ currentStudy.hallazgos.push(h.value); filled.push(h.value); }
-            log.push('Hallazgo agregado: '+h.value);
           } else {
             currentStudy[h.field]=h.value;
             const el=document.getElementById('f_'+h.field);
-            log.push('Campo f_'+h.field+': '+(el?'ENCONTRADO':'NO ENCONTRADO EN DOM'));
             if(el){
               el.value=h.value;
               el.dispatchEvent(new Event('input',{bubbles:true}));
               el.dispatchEvent(new Event('change',{bubbles:true}));
-              log.push('Valor asignado: '+h.value);
             }
-            try{ handleAutoCalcTrigger(h.field); }catch(e){ log.push('Error autoCalc: '+e.message); }
+            handleAutoCalcTrigger(h.field);
             filled.push((FIELD_LABELS_BY_ID[h.field]||h.field)+' = '+h.value);
           }
         });
-
+        const feed = document.getElementById('voiceFeed');
         if(feed){
-          const color = filled.length ? '#3a7d5c' : 'var(--gray-3)';
           feed.innerHTML =
-            '<div style="font-size:10px;color:var(--gray-3);margin-bottom:4px;border:1px solid #eee;padding:4px;border-radius:4px;">'+
-            log.map(l=>'<div>'+l+'</div>').join('')+'</div>'+
+            '<div style="color:var(--gray-2);font-size:11px;margin-bottom:3px;">"'+transcript.trim()+'"</div>'+
             (filled.length
               ? '<div style="color:#3a7d5c;font-weight:600;font-size:12px;">✓ '+filled.join(' · ')+'</div>'
-              : '<div style="color:var(--gray-3);font-style:italic;font-size:11px;">No se completó ningún campo. Ver log arriba.</div>');
+              : '<div style="color:var(--gray-3);font-style:italic;font-size:11px;">No reconocí ningún campo. Probá: "FEVI 65", "TAPSE 22", "onda E 90".</div>');
         }
         buildChips();
         applyConditionalVisibility();
