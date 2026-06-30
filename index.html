@@ -92,6 +92,59 @@ button{font-family:inherit;}
 .voice-btn.on{background:var(--ink);color:#fff;}
 .voice-feed{font-size:11.5px;color:var(--gray-2);margin-top:6px;min-height:14px;}
 
+/* Botón de dictado flotante: acompaña el scroll en el costado derecho del formulario,
+   difuminado cuando no está activo para no estorbar */
+.voice-float{
+  position:fixed;
+  bottom:28px;
+  /* se posiciona calculado por JS para quedar dentro del form-pane */
+  right:calc(54% + 12px);
+  width:52px;height:52px;
+  border-radius:50%;
+  border:none;
+  background:var(--ink);
+  color:#fff;
+  font-size:22px;
+  cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 2px 12px rgba(0,0,0,.18);
+  opacity:0.35;
+  transition:opacity .2s, transform .15s;
+  z-index:100;
+  -webkit-user-select:none;user-select:none;
+}
+.voice-float:hover,.voice-float:focus{opacity:0.85;}
+.voice-float.on{
+  background:#B3432A;
+  opacity:1;
+  animation:floatPulse 1.2s infinite;
+}
+@keyframes floatPulse{
+  0%{box-shadow:0 0 0 0 rgba(179,67,42,.4);}
+  70%{box-shadow:0 0 0 12px rgba(179,67,42,0);}
+  100%{box-shadow:0 0 0 0 rgba(179,67,42,0);}
+}
+.voice-float-feed{
+  position:fixed;
+  bottom:88px;
+  right:calc(54% + 4px);
+  width:180px;
+  background:var(--ink);
+  color:#fff;
+  font-size:11px;
+  padding:7px 10px;
+  border-radius:8px;
+  display:none;
+  z-index:100;
+  line-height:1.4;
+  text-align:right;
+}
+.voice-float-feed.visible{display:block;}
+@media(max-width:980px){
+  .voice-float{right:16px;bottom:24px;}
+  .voice-float-feed{right:12px;width:160px;}
+}
+
 .fgroup{border:1px solid var(--line);border-radius:8px;margin-bottom:10px;}
 .fgroup-head{padding:10px 14px;cursor:pointer;font-size:12.5px;font-weight:700;letter-spacing:.03em;
   text-transform:uppercase;color:var(--gray-1);display:flex;justify-content:space-between;}
@@ -222,7 +275,7 @@ table.rp-table td.out{font-weight:700;}
     <div class="patient-list" id="patientList"></div>
     <div class="sidebar-foot">
       <button class="btn" id="btnNewPatient">+ Nuevo paciente</button>
-      <div style="text-align:center;font-size:10px;color:var(--gray-3);margin-top:8px;">build 2026-06-25-r12</div>
+      <div style="text-align:center;font-size:10px;color:var(--gray-3);margin-top:8px;">build 2026-06-25-r13</div>
     </div>
   </div>
   <div class="main" id="main"></div>
@@ -1526,7 +1579,15 @@ const App = (()=>{
     });
   }
 
+  function showFloatBtn(visible){
+    const btn = document.getElementById('voiceBtn');
+    const feed = document.getElementById('voiceFeed');
+    if(btn) btn.style.display = visible ? 'flex' : 'none';
+    if(feed && !visible){ feed.innerHTML=''; feed.classList.remove('visible'); }
+  }
+
   function renderWelcome(){
+    showFloatBtn(false);
     document.getElementById('main').innerHTML = `
       <div class="empty-state">
         <h2>Seleccioná un paciente</h2>
@@ -1578,6 +1639,7 @@ const App = (()=>{
 
   /* ---------- pantalla detalle paciente ---------- */
   async function openPatient(id){
+    showFloatBtn(false);
     currentPatientId = id;
     renderPatientList();
     let patient, studies;
@@ -1640,6 +1702,7 @@ const App = (()=>{
 
   /* ---------- editor de estudio ---------- */
   async function openStudyEditor(patientId, studyId){
+    showFloatBtn(true);
     const patient = await PatientService.get(patientId);
     currentStudy = studyId ? await StudyService.get(studyId) : {
       patientIdRef: patientId, p_nombre: patient.nombre, p_sexo: patient.sexo||'', p_edad: patient.edad||'',
@@ -1706,8 +1769,8 @@ const App = (()=>{
           <button id="btnModeFull" class="${expressMode?'':'active'}">Completo</button>
           <button id="btnModeExpress" class="${expressMode?'active':''}">Express</button>
         </div>
-        <div class="voice-bar"><button class="voice-btn" id="voiceBtn">Dictar hallazgos</button></div>
-        <div class="voice-feed" id="voiceFeed"></div>
+        <div class="voice-bar" style="display:none"></div>
+        <div class="voice-feed" id="voiceFeed" style="display:none"></div>
 
         <div class="fgroup open">
           <div class="fgroup-head">Datos del paciente y resumen<span>▾</span></div>
@@ -2042,10 +2105,13 @@ const App = (()=>{
         const feed = document.getElementById('voiceFeed');
         if(feed){
           feed.innerHTML =
-            '<div style="color:var(--gray-2);font-size:11px;margin-bottom:3px;">"'+transcript.trim()+'"</div>'+
+            '<div style="font-size:10px;opacity:.7;margin-bottom:2px;">"'+transcript.trim()+'"</div>'+
             (filled.length
-              ? '<div style="color:#3a7d5c;font-weight:600;font-size:12px;">✓ '+filled.join(' · ')+'</div>'
-              : '<div style="color:var(--gray-3);font-style:italic;font-size:11px;">No reconocí ningún campo. Probá: "FEVI 65", "TAPSE 22", "onda E 90".</div>');
+              ? '<div style="font-weight:700;font-size:12px;">✓ '+filled.join('<br>')+'</div>'
+              : '<div style="font-size:10px;opacity:.7;">No reconocí ningún campo.</div>');
+          feed.classList.add('visible');
+          clearTimeout(feed._hideTimer);
+          feed._hideTimer = setTimeout(()=>{ feed.classList.remove('visible'); }, 3000);
         }
         buildChips();
         applyConditionalVisibility();
@@ -2054,9 +2120,11 @@ const App = (()=>{
       (on)=>{
         const btn=document.getElementById('voiceBtn');
         const feed=document.getElementById('voiceFeed');
-        if(btn){ btn.classList.toggle('on',on); btn.textContent=on?'⏹ Detener':'🎙 Dictar'; }
-        if(on && feed) feed.innerHTML='<div style="color:var(--gray-3);font-size:11px;font-style:italic;">Escuchando... hablá ahora.</div>';
-        if(!on && feed) feed.innerHTML='';
+        if(btn){ btn.classList.toggle('on',on); btn.textContent=on?'⏹':'🎙'; btn.title=on?'Detener dictado':'Dictar mediciones'; }
+        if(feed){
+          if(on){ feed.innerHTML='<div style="font-size:11px;">Escuchando...</div>'; feed.classList.add('visible'); }
+          else{ feed.innerHTML=''; feed.classList.remove('visible'); }
+        }
       }
     );
   }
@@ -2186,5 +2254,9 @@ const App = (()=>{
 
 App.init();
 </script>
+<!-- Botón flotante de dictado: acompaña el scroll, difuminado cuando está inactivo -->
+<button class="voice-float" id="voiceBtn" style="display:none;" title="Dictar mediciones">🎙</button>
+<div class="voice-float-feed" id="voiceFeed"></div>
+
 </body>
 </html>
