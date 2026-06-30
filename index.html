@@ -105,6 +105,17 @@ button{font-family:inherit;}
 .fitem input:focus,.fitem select:focus,.fitem textarea:focus{outline:none;border-color:var(--gray-1);}
 .fitem.full{grid-column:1/3;}
 .fitem textarea{min-height:50px;font-family:inherit;resize:vertical;}
+/* campo escuchando: borde azul animado + fondo suave */
+.fitem input.field-listening{border-color:#1B6B6B !important;background:#f0fafa !important;
+  box-shadow:0 0 0 3px rgba(27,107,107,.15);}
+/* contenedor posición para el mic inline */
+.fitem-wrap{position:relative;}
+.fitem-mic{position:absolute;right:6px;top:50%;transform:translateY(-50%);
+  width:24px;height:24px;border:none;background:none;cursor:pointer;font-size:15px;
+  display:none;align-items:center;justify-content:center;opacity:.4;}
+.fitem-wrap:focus-within .fitem-mic{display:flex;}
+.fitem-mic.active{opacity:1;animation:micPulse .8s infinite alternate;}
+@keyframes micPulse{from{opacity:.6;}to{opacity:1;}}
 
 .chip-row{display:flex;flex-wrap:wrap;gap:6px;}
 .chip{border:1px solid var(--line);border-radius:14px;padding:5px 11px;font-size:11.5px;cursor:pointer;background:var(--paper);}
@@ -211,7 +222,7 @@ table.rp-table td.out{font-weight:700;}
     <div class="patient-list" id="patientList"></div>
     <div class="sidebar-foot">
       <button class="btn" id="btnNewPatient">+ Nuevo paciente</button>
-      <div style="text-align:center;font-size:10px;color:var(--gray-3);margin-top:8px;">build 2026-06-25-r11</div>
+      <div style="text-align:center;font-size:10px;color:var(--gray-3);margin-top:8px;">build 2026-06-25-r12</div>
     </div>
   </div>
   <div class="main" id="main"></div>
@@ -1238,7 +1249,43 @@ const VoiceEngine = (()=>{
 
     startRecognition();
   }
-  return { toggle, parse };
+  /* Dictado directo en un campo específico: el médico toca el campo, habla el valor,
+     y se completa sin necesidad de decir el nombre del campo. */
+  function dictateIntoField(inputEl, onDone){
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if(!SR){ inputEl.focus(); return; }
+    let fieldRec = new SR();
+    fieldRec.lang = 'es-AR';
+    fieldRec.continuous = false;
+    fieldRec.interimResults = false;
+    fieldRec.maxAlternatives = 3;
+    inputEl.classList.add('field-listening');
+    fieldRec.onresult = (ev)=>{
+      /* probar las alternativas en orden hasta encontrar un número válido */
+      for(let a=0; a<ev.results[0].length; a++){
+        const raw = ev.results[0][a].transcript.trim();
+        const n = extractLeadingNumber(normalizeAccents(raw.toLowerCase()));
+        if(n!==null){
+          inputEl.value = n;
+          inputEl.dispatchEvent(new Event('input',{bubbles:true}));
+          inputEl.dispatchEvent(new Event('change',{bubbles:true}));
+          if(onDone) onDone(n);
+          break;
+        }
+        /* si no es número, colocar el texto tal cual (para campos de texto como médico/motivo) */
+        if(a===ev.results[0].length-1 && inputEl.type!=='number'){
+          inputEl.value = raw;
+          inputEl.dispatchEvent(new Event('input',{bubbles:true}));
+        }
+      }
+      inputEl.classList.remove('field-listening');
+    };
+    fieldRec.onerror = ()=>{ inputEl.classList.remove('field-listening'); };
+    fieldRec.onend  = ()=>{ inputEl.classList.remove('field-listening'); };
+    try{ fieldRec.start(); }catch(e){}
+  }
+
+  return { toggle, parse, dictateIntoField };
 })();
 
 /* ---------------- PdfService ---------------- */
@@ -1731,11 +1778,45 @@ const App = (()=>{
     document.getElementById('imgInput').onchange = handleImages;
     document.getElementById('instLogoInput').onchange = handleInstLogo;
 
+    /* Debounce del render: espera 120ms antes de redibujar el informe,
+       así no se ralentiza mientras el médico escribe rápido */
+    let renderTimer = null;
+    function debouncedRender(){ clearTimeout(renderTimer); renderTimer = setTimeout(renderReport, 120); }
+
     document.querySelectorAll('[data-field]').forEach(el=>{
-      el.addEventListener('input', ()=>{ readFieldsIntoStudy(); handleAutoCalcTrigger(el.dataset.field); applyConditionalVisibility(); renderReport(); });
-      el.addEventListener('change', ()=>{ readFieldsIntoStudy(); handleAutoCalcTrigger(el.dataset.field); applyConditionalVisibility(); renderReport(); });
+      el.addEventListener('input', ()=>{ readFieldsIntoStudy(); handleAutoCalcTrigger(el.dataset.field); applyConditionalVisibility(); debouncedRender(); });
+      el.addEventListener('change', ()=>{ readFieldsIntoStudy(); handleAutoCalcTrigger(el.dataset.field); applyConditionalVisibility(); debouncedRender(); });
       el.addEventListener('focus', ()=> showRefHint(el));
       el.addEventListener('blur', hideRefHint);
+
+      /* Botón de mic inline: solo en inputs de texto/número, no en selects ni textareas */
+      if(el.tagName==='INPUT'){
+        const wrap = el.parentElement;
+        wrap.style.position = 'relative';
+        const micBtn = document.createElement('button');
+        micBtn.type = 'button';
+        micBtn.textContent = '🎙';
+        micBtn.className = 'fitem-mic';
+        micBtn.title = 'Dictá el valor';
+        micBtn.addEventListener('mousedown', e=>e.preventDefault()); // evitar perder focus del input
+        micBtn.addEventListener('click', (e)=>{
+          e.preventDefault();
+          micBtn.classList.add('active');
+          VoiceEngine.dictateIntoField(el, (val)=>{
+            micBtn.classList.remove('active');
+            readFieldsIntoStudy();
+            handleAutoCalcTrigger(el.dataset.field);
+            applyConditionalVisibility();
+            renderReport();
+            /* avanzar al siguiente campo automáticamente */
+            const allInputs = Array.from(document.querySelectorAll('.form-pane [data-field]'));
+            const idx = allInputs.indexOf(el);
+            if(idx>=0 && idx<allInputs.length-1) allInputs[idx+1].focus();
+          });
+          micBtn.addEventListener('animationend', ()=> micBtn.classList.remove('active'), {once:true});
+        });
+        wrap.appendChild(micBtn);
+      }
     });
     const formPaneEl = document.querySelector('.form-pane');
     if(formPaneEl) formPaneEl.addEventListener('scroll', hideRefHint);
