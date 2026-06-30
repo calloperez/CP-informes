@@ -211,7 +211,7 @@ table.rp-table td.out{font-weight:700;}
     <div class="patient-list" id="patientList"></div>
     <div class="sidebar-foot">
       <button class="btn" id="btnNewPatient">+ Nuevo paciente</button>
-      <div style="text-align:center;font-size:10px;color:var(--gray-3);margin-top:8px;">build 2026-06-25-r7</div>
+      <div style="text-align:center;font-size:10px;color:var(--gray-3);margin-top:8px;">build 2026-06-25-r9-debug</div>
     </div>
   </div>
   <div class="main" id="main"></div>
@@ -1045,51 +1045,50 @@ const VoiceEngine = (()=>{
      exacto como aparece en la app: cualquiera de estas frases sirve. */
   const VOICE_ALIASES = {
     // Aorta
-    ao_anillo: ['anillo a[oó]rtico','anillo de la a[oó]rtica'],
-    ao_raiz: ['ra[ií]z a[oó]rtica','ra[ií]z de la aorta','aorta sinusal','seno de valsalva'],
+    ao_anillo: ['anillo a[oó]rtico','anillo de la a[oó]rtica','anillo'],
+    ao_raiz: ['ra[ií]z a[oó]rtica','ra[ií]z de la aorta','aorta sinusal','seno de valsalva','raiz aortica'],
     ao_ust: ['uni[oó]n sinotubular','uni[oó]n senotubular'],
     ao_asc: ['aorta ascendente'],
     // Aurícula izquierda
     ai_diam: ['di[aá]metro auricular izquierdo','di[aá]metro de aur[ií]cula izquierda','di[aá]metro de ai','ai di[aá]metro','aur[ií]cula izquierda(?!\\s*(?:volumen|indexad))','\\bai\\b(?!\\s*(?:volumen|indexad))'],
     ai_vol: ['volumen total de aur[ií]cula izquierda','volumen de aur[ií]cula izquierda(?!\\s*indexad)','volumen auricular izquierdo(?!\\s*indexad)','volumen de ai(?!\\s*indexad)','ai volumen(?!\\s*indexad)'],
     ai_voli: ['volumen indexado de aur[ií]cula izquierda','volumen auricular izquierdo indexado','volumen de aur[ií]cula izquierda indexado','ai indexada','ai indexado','volumen indexado de ai','ai volumen indexado','[ií]ndice de volumen auricular','volumen auricular indexado'],
-    // Ventrículo izquierdo
-    vi_siv: ['septum interventricular','septum','tabique interventricular'],
-    vi_pp: ['pared posterior'],
-    vi_ddvi: ['ddvi','di[aá]metro diast[oó]lico del ventr[ií]culo izquierdo','di[aá]metro diast[oó]lico final','di[aá]metro de fin de di[aá]stole'],
-    vi_dsvi: ['dsvi','di[aá]metro sist[oó]lico del ventr[ií]culo izquierdo','di[aá]metro sist[oó]lico final','di[aá]metro de fin de s[ií]stole'],
-    vi_vtd: ['volumen telediast[oó]lico','volumen de fin de di[aá]stole'],
-    vi_vts: ['volumen telesist[oó]lico','volumen de fin de s[ií]stole'],
-    vi_fevi: ['fracci[oó]n de eyecci[oó]n','fey','fevi'],
-    vi_gls: ['gls','strain longitudinal global','strain global'],
-    vi_masai: ['masa indexada','[ií]ndice de masa','masa del ventr[ií]culo izquierdo indexada'],
-    // Motilidad (índice WMSI no se dicta, los segmentos se marcan a mano)
+    // Ventrículo izquierdo — aliases ampliados
+    vi_siv: ['septum interventricular','septum','tabique interventricular','espesor del septum','espesor septal'],
+    vi_pp: ['pared posterior','espesor de pared posterior','espesor parietal'],
+    vi_ddvi: ['ddvi','di[aá]metro diast[oó]lico del ventr[ií]culo izquierdo','di[aá]metro diast[oó]lico final','di[aá]metro de fin de di[aá]stole','ventr[ií]culo izquierdo en di[aá]stole','vi en di[aá]stole','di[aá]metro diastólico'],
+    vi_dsvi: ['dsvi','di[aá]metro sist[oó]lico del ventr[ií]culo izquierdo','di[aá]metro sist[oó]lico final','di[aá]metro de fin de s[ií]stole','ventr[ií]culo izquierdo en s[ií]stole','vi en s[ií]stole','di[aá]metro sist[oó]lico'],
+    vi_vtd: ['volumen telediast[oó]lico','volumen de fin de di[aá]stole','vtd'],
+    vi_vts: ['volumen telesist[oó]lico','volumen de fin de s[ií]stole','vts'],
+    vi_fevi: ['fracci[oó]n de eyecci[oó]n','fey','fevi','fraccion de eyeccion','fe'],
+    vi_gls: ['gls','strain longitudinal global','strain global','deformaci[oó]n longitudinal'],
+    vi_masai: ['masa indexada','[ií]ndice de masa','masa del ventr[ií]culo izquierdo indexada','masa indexada del vi'],
     // VD / AD / pulmonar
-    vd_diam: ['ventr[ií]culo derecho basal','di[aá]metro basal del ventr[ií]culo derecho','di[aá]metro del ventr[ií]culo derecho'],
+    vd_diam: ['ventr[ií]culo derecho basal','di[aá]metro basal del ventr[ií]culo derecho','di[aá]metro del ventr[ií]culo derecho','vd di[aá]metro'],
     vd_tapse: ['tapse'],
     vd_fac: ['fac','fracci[oó]n de acortamiento del [aá]rea','fracci[oó]n de acortamiento'],
-    vd_s: ["s prima","onda s prima","velocidad s prima","s tisular"],
-    ad_area: ['[aá]rea de aur[ií]cula derecha','aur[ií]cula derecha [aá]rea'],
-    pul_psap: ['psap','presi[oó]n sist[oó]lica de arteria pulmonar','presi[oó]n pulmonar'],
+    vd_s: ['s prima','onda s prima','velocidad s prima','s tisular','onda s'],
+    ad_area: ['[aá]rea de aur[ií]cula derecha','aur[ií]cula derecha [aá]rea','ad [aá]rea'],
+    pul_psap: ['psap','presi[oó]n sist[oó]lica de arteria pulmonar','presi[oó]n pulmonar','presion pulmonar'],
     pul_vci: ['vci','vena cava inferior'],
     // Función diastólica
-    d_e: ['onda e mitral','onda e','velocidad e','pico e','flujo e'],
-    d_a: ['onda a mitral','onda a','velocidad a','pico a'],
-    d_eseptal: ["e prima septal","e' septal","onda e prima septal","e tisular septal"],
-    d_elateral: ["e prima lateral","e' lateral","onda e prima lateral","e tisular lateral"],
+    d_e: ['onda e mitral','onda e','velocidad e','pico e','flujo e','velocidad de la onda e','\\be\\b(?!\\s*prima)'],
+    d_a: ['onda a mitral','onda a','velocidad a','pico a','velocidad de la onda a'],
+    d_eseptal: ["e prima septal","e' septal","onda e prima septal","e tisular septal","e prima del septum"],
+    d_elateral: ["e prima lateral","e' lateral","onda e prima lateral","e tisular lateral","e prima de la pared lateral"],
     d_dt: ['tiempo de desaceleraci[oó]n','desaceleraci[oó]n de la onda e','dt'],
     d_ivrt: ['ivrt','triv','tiempo de relajaci[oó]n isovolum[eé]trica'],
-    d_vtr: ['vmax tricusp[ií]dea','velocidad de regurgitaci[oó]n tricusp[ií]dea','vmax tr','jet tricusp[ií]deo'],
+    d_vtr: ['vmax tricusp[ií]dea','velocidad de regurgitaci[oó]n tricusp[ií]dea','vmax tr','jet tricusp[ií]deo','velocidad jet tricuspideo'],
     // Válvula aórtica / TSVI
-    tsvi_diam: ['di[aá]metro del tsvi','tsvi di[aá]metro','di[aá]metro del tracto de salida'],
+    tsvi_diam: ['di[aá]metro del tsvi','tsvi di[aá]metro','di[aá]metro del tracto de salida','tracto de salida'],
     tsvi_vmax: ['vmax del tsvi','velocidad del tracto de salida'],
     tsvi_gradm: ['gradiente del tsvi','gradiente del tracto de salida'],
-    vao_vmax: ['vmax a[oó]rtico','velocidad m[aá]xima a[oó]rtica','vmax de la v[aá]lvula a[oó]rtica'],
-    vao_gradm: ['gradiente medio a[oó]rtico','gradiente medio de la v[aá]lvula a[oó]rtica'],
-    vao_area: ['[aá]rea valvular a[oó]rtica','[aá]rea a[oó]rtica'],
+    vao_vmax: ['vmax a[oó]rtico','velocidad m[aá]xima a[oó]rtica','vmax de la v[aá]lvula a[oó]rtica','velocidad aortica maxima'],
+    vao_gradm: ['gradiente medio a[oó]rtico','gradiente medio de la v[aá]lvula a[oó]rtica','gradiente medio aortico'],
+    vao_area: ['[aá]rea valvular a[oó]rtica','[aá]rea a[oó]rtica','area de la valvula aortica'],
     // Válvula mitral
-    vmi_gradm: ['gradiente medio mitral','gradiente de la v[aá]lvula mitral'],
-    vmi_area: ['[aá]rea valvular mitral','[aá]rea mitral'],
+    vmi_gradm: ['gradiente medio mitral','gradiente de la v[aá]lvula mitral','gradiente mitral'],
+    vmi_area: ['[aá]rea valvular mitral','[aá]rea mitral','area de la valvula mitral'],
     vmi_vc: ['vena contracta'],
     vmi_pisa: ['radio de pisa','pisa'],
     vmi_eroa: ['eroa','[aá]rea de orificio regurgitante'],
@@ -1902,28 +1901,39 @@ const App = (()=>{
   function handleVoiceToggle(){
     VoiceEngine.toggle(
       (transcript, hits)=>{
+        const feed = document.getElementById('voiceFeed');
+        const log = [];
+        log.push('Texto: "'+transcript.trim()+'"');
+        log.push('Campos encontrados: '+(hits.length ? hits.map(h=>h.field+'='+h.value).join(', ') : 'NINGUNO'));
+
         const filled = [];
         hits.forEach(h=>{
           if(h.field==='__hallazgo'){
             if(!currentStudy.hallazgos.includes(h.value)){ currentStudy.hallazgos.push(h.value); filled.push(h.value); }
+            log.push('Hallazgo agregado: '+h.value);
           } else {
             currentStudy[h.field]=h.value;
             const el=document.getElementById('f_'+h.field);
+            log.push('Campo f_'+h.field+': '+(el?'ENCONTRADO':'NO ENCONTRADO EN DOM'));
             if(el){
               el.value=h.value;
               el.dispatchEvent(new Event('input',{bubbles:true}));
+              el.dispatchEvent(new Event('change',{bubbles:true}));
+              log.push('Valor asignado: '+h.value);
             }
-            handleAutoCalcTrigger(h.field);
+            try{ handleAutoCalcTrigger(h.field); }catch(e){ log.push('Error autoCalc: '+e.message); }
             filled.push((FIELD_LABELS_BY_ID[h.field]||h.field)+' = '+h.value);
           }
         });
-        const feed = document.getElementById('voiceFeed');
+
         if(feed){
+          const color = filled.length ? '#3a7d5c' : 'var(--gray-3)';
           feed.innerHTML =
-            '<div style="color:var(--gray-2);font-size:11px;margin-bottom:3px;">"'+transcript.trim()+'"</div>'+
+            '<div style="font-size:10px;color:var(--gray-3);margin-bottom:4px;border:1px solid #eee;padding:4px;border-radius:4px;">'+
+            log.map(l=>'<div>'+l+'</div>').join('')+'</div>'+
             (filled.length
               ? '<div style="color:#3a7d5c;font-weight:600;font-size:12px;">✓ '+filled.join(' · ')+'</div>'
-              : '<div style="color:var(--gray-3);font-style:italic;font-size:11px;">Escuché la frase pero no reconocí ningún campo. Probá: "FEVI sesenta y cinco", "TAPSE veintidós", "onda E noventa".</div>');
+              : '<div style="color:var(--gray-3);font-style:italic;font-size:11px;">No se completó ningún campo. Ver log arriba.</div>');
         }
         buildChips();
         applyConditionalVisibility();
