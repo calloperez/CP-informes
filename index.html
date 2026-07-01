@@ -2206,7 +2206,7 @@ const App = (()=>{
   function bindEditorEvents(patientId, studyId){
     document.getElementById('btnBack').onclick = ()=> openPatient(patientId);
     document.getElementById('btnSaveStudy').onclick = ()=> saveCurrentStudy(patientId, studyId);
-    document.getElementById('btnPdf').onclick = ()=> window.print();
+    document.getElementById('btnPdf').onclick = ()=>{       const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);       if(isIOS){         const paper = document.getElementById('paper');         PdfService.downloadFromElement(paper, 'informe_'+(currentStudy.p_nombre||'ecocardiograma'));       } else {         window.print();       }     };
     document.querySelectorAll('.fgroup-head').forEach(h=> h.onclick = ()=> h.parentElement.classList.toggle('open'));
     document.getElementById('btnModeFull').onclick = ()=> setExpress(false);
     document.getElementById('btnModeExpress').onclick = ()=> setExpress(true);
