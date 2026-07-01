@@ -286,7 +286,7 @@ table.rp-table td.out{font-weight:700;}
     <div class="patient-list" id="patientList"></div>
     <div class="sidebar-foot">
       <button class="btn" id="btnNewPatient">+ Nuevo paciente</button>
-      <div style="text-align:center;font-size:10px;color:var(--gray-3);margin-top:8px;">build 2026-06-25-r16</div>
+      <div style="text-align:center;font-size:10px;color:var(--gray-3);margin-top:8px;">build 2026-06-25-r17</div>
     </div>
   </div>
   <div class="main" id="main"></div>
@@ -691,7 +691,136 @@ const ClinicalEngine = (()=>{
     return { wmsi, abnormal, territoryCounts, suggestedTerritory };
   }
 
-  return { bsa, bmi, classifyFEVI, classifyDiastolic, classifyAortic, num, calcFEVI, calcFEVISimpson, calcFEVITeichholz, calcMass, calcGeometry, calcEA, calcEe, calcAVA, calcWallMotion };
+  /* ================================================================
+     MOTOR DE CÁLCULOS HEMODINÁMICOS — ASE/ESC 2024
+     ================================================================ */
+
+  /* --- 1. CONTINUIDAD: AVA = (ATSVI × VTI_TSVI) / VTI_Ao
+            También calcula Vmax TSVI→ Ao y verifica consistencia      */
+  function calcAVA(d){
+    const dTSVI = num(d.tsvi_diam), vTSVI = num(d.tsvi_vmax), vAo = num(d.vao_vmax);
+    const itvTSVI = num(d.tsvi_vtitsvi), itvAo = num(d.vao_vtiao);
+    if(dTSVI===null || vAo===null) return null;
+    const rTSVI = (dTSVI/10)/2;
+    const aTSVI = Math.PI*rTSVI*rTSVI; // cm²
+    // Preferir método VTI (más preciso) sobre Vmax si está disponible
+    if(itvTSVI!==null && itvAo!==null && itvAo>0)
+      return Math.round(aTSVI*itvTSVI/itvAo*100)/100;
+    if(vTSVI!==null && vAo>0)
+      return Math.round(aTSVI*vTSVI/vAo*100)/100;
+    return null;
+  }
+
+  /* --- 2. VOLUMEN SISTÓLICO & GASTO CARDÍACO (método Doppler)
+            SV = ATSVI × VTI_TSVI   CO = SV × FC                      */
+  function calcSVCO(d){
+    const dTSVI = num(d.tsvi_diam), itvTSVI = num(d.tsvi_vtitsvi), fc = num(d.p_fc);
+    if(dTSVI===null || itvTSVI===null) return null;
+    const rTSVI = (dTSVI/10)/2;
+    const sv = Math.round(Math.PI*rTSVI*rTSVI*itvTSVI*10)/10; // ml
+    const co = fc!==null ? Math.round(sv*fc/1000*10)/10 : null; // L/min
+    return { sv, co };
+  }
+
+  /* --- 3. BERNOULLI SIMPLIFICADA: Gradiente = 4 × Vmax²
+            Para cualquier flujo obstructivo                             */
+  function bernoulli(vmax){ return vmax!==null ? Math.round(4*vmax*vmax) : null; }
+
+  /* --- 4. PSAP = 4 × VmaxTR² + PAD
+            PAD estimada por VCI y colapso inspiratorio (ASE 2021)      */
+  function calcPSAP(d){
+    const vtr = num(d.d_vtr || d.pul_vtr);
+    if(vtr===null) return null;
+    const vci = num(d.pul_vci);
+    // PAD estimada: VCI ≤21mm → 3 mmHg; VCI >21mm → 8 mmHg; sin dato → 5 mmHg
+    const pad = vci!==null ? (vci<=21 ? 3 : 8) : 5;
+    return Math.round(4*vtr*vtr + pad);
+  }
+
+  /* --- 5. PRESIÓN DE LLENADO VI: E/e' promedio (ASE 2024)
+            Promedio de e' septal y lateral cuando ambos disponibles    */
+  function calcEoverEprime(d){
+    const e = num(d.d_e), es = num(d.d_eseptal), el = num(d.d_elateral);
+    if(e===null) return null;
+    if(es!==null && el!==null) return Math.round(e/((es+el)/2)*10)/10;
+    if(es!==null) return Math.round(e/es*10)/10;
+    if(el!==null) return Math.round(e/el*10)/10;
+    return null;
+  }
+
+  /* --- 6. ÁREA MITRAL POR PRESIÓN MEDIO TIEMPO (PHT)
+            MVA = 220/PHT   (Henry/Hatle, validado en estenosis mitral)
+            MVA por DT: MVA ≈ 759/DT  (alternativa)                    */
+  function calcMVA(d){
+    const pht = num(d.d_pht), dt = num(d.d_dt);
+    if(pht!==null && pht>0) return Math.round(220/pht*100)/100;
+    if(dt!==null && dt>0)   return Math.round(759/dt*100)/100;
+    return null;
+  }
+
+  /* --- 7. CUANTIFICACIÓN INSUFICIENCIA VALVULAR (PISA + Continuidad)
+            EROA (cm²) = 2π × r² × Va / Vmax_reg   (Va=40 cm/s)
+            Vol_reg (ml) = EROA × VTI_reg
+            Forward SV (ml) = ATSVI × VTI_TSVI
+            FR (%) = Vol_reg / Forward_SV × 100                        */
+  function calcRegurg(d, prefix){
+    const r      = num(d[prefix+'_pisa']);    // mm
+    const vmaxR  = num(d[prefix+'_vmaxr']);   // m/s
+    const eroa0  = num(d[prefix+'_eroa']);    // cm² (ingresado)
+    const itvR   = num(d[prefix+'_itvr']);    // cm VTI jet
+    const dTSVI  = num(d.tsvi_diam);          // mm
+    const itvTSVI= num(d[prefix==='vmi'?'vmi_icvao':'vao_icvt']); // cm VTI TSVI
+    const va     = 40; // cm/s aliasing velocity estándar
+
+    // EROA por PISA
+    let eroa = eroa0;
+    if(eroa===null && r!==null && vmaxR!==null && vmaxR>0){
+      const rCm = r/10;
+      eroa = Math.round(2*Math.PI*rCm*rCm*va/(vmaxR*100)*100)/100;
+    }
+
+    // Vol_reg = EROA × VTI_reg
+    let vreg = num(d[prefix+'_vreg']);
+    if(vreg===null && eroa!==null && itvR!==null)
+      vreg = Math.round(eroa*itvR*10)/10;
+
+    // Forward SV = ATSVI × VTI_TSVI
+    let fwdSV = null;
+    if(dTSVI!==null && itvTSVI!==null){
+      const rT = (dTSVI/10)/2;
+      fwdSV = Math.round(Math.PI*rT*rT*itvTSVI*10)/10;
+    }
+
+    // FR = Vol_reg / Forward_SV × 100
+    let fr = num(d[prefix+'_frreg']);
+    if(fr===null && vreg!==null && fwdSV!==null && fwdSV>0)
+      fr = Math.round(vreg/fwdSV*100);
+
+    return { eroa, vreg, fwdSV, fr };
+  }
+
+  /* --- 8. PHT PARA INSUFICIENCIA AÓRTICA
+            PHT <200ms → IA severa, 200-500ms → moderada, >500ms → leve
+            Devuelve la clasificación de severidad sugerida por PHT      */
+  function classifyARbyPHT(pht){
+    if(pht===null) return null;
+    if(pht<200) return 'Severa (PHT <200ms)';
+    if(pht<500) return 'Moderada (PHT 200-500ms)';
+    return 'Leve (PHT >500ms)';
+  }
+
+  /* --- 9. ÍNDICE DE PERFORMANCE MIOCÁRDICA (Tei index)
+            Tei = (TRIV + TRCP) / TEY — omitido por requerir parámetros adicionales */
+
+  return {
+    bsa, bmi,
+    classifyFEVI, classifyDiastolic, classifyAortic,
+    num, bernoulli,
+    calcFEVI, calcFEVISimpson, calcFEVITeichholz,
+    calcMass, calcGeometry, calcEA, calcEe,
+    calcAVA, calcSVCO, calcPSAP, calcEoverEprime, calcMVA,
+    calcWallMotion, calcRegurg, classifyARbyPHT
+  };
 })();
 
 /* ---------------- Field definitions ---------------- */
@@ -731,43 +860,49 @@ const FIELD_GROUPS = [
     ]
   },
   {id:'vao', label:'Válvula aórtica', express:true, fields:[
-    ['tsvi_diam','Diámetro TSVI'],['tsvi_vmax','Vmax TSVI'],['tsvi_gradm','Gradiente TSVI'],
-    ['vao_vmax','Vmax'],['vao_gradm','Gradiente medio'],['vao_area','Área valvular']
+    ['tsvi_diam','Diámetro TSVI (mm)'],['tsvi_vmax','Vmax TSVI (m/s)'],['tsvi_gradm','Gradiente TSVI (mmHg)'],
+    ['tsvi_vtitsvi','VTI TSVI (cm)'],
+    ['vao_vmax','Vmax (m/s)'],['vao_gradm','Gradiente medio (mmHg)'],['vao_area','Área valvular (cm²)'],
+    ['vao_vtiao','VTI Ao (cm)']
   ], extra:[['vao_morf','Morfología',['Tricúspide','Bicúspide','Prótesis']],['vao_insuf','Insuficiencia',['','Leve','Moderada','Moderada-Severa','Severa']]],
     conditionalOn:'vao_insuf', conditionalValue_in:['Moderada','Moderada-Severa','Severa'],
     conditionalLabel:'Cuantificación de insuficiencia aórtica (ASE/ESC)',
     conditionalFields:[
       ['vao_vc','Vena contracta (mm)'],
       ['vao_pht','PHT — Pressure Half Time (ms)'],
+      ['vao_pisa','Radio PISA (mm)'],
+      ['vao_vmaxr','Vmax jet regurg. (m/s)'],
+      ['vao_itvr','ITV jet regurg. (cm)'],
+      ['vao_icvt','ITV-TSVI (cm)'],
       ['vao_eroa','EROA (cm²)'],
       ['vao_vreg','Volumen regurgitante (ml)'],
-      ['vao_frreg','Fracción regurgitante (%)'],
-      ['vao_icvt','Integral velocidad TSVI (ITV-TSVI)'],
-      ['vao_icvao','Integral velocidad Ao (ITV-Ao)']
+      ['vao_frreg','Fracción regurgitante (%)']
   ]},
   {id:'vmi', label:'Válvula mitral', express:true, fields:[
-    ['vmi_gradm','Gradiente medio'],['vmi_area','Área valvular']
+    ['vmi_gradm','Gradiente medio (mmHg)'],['vmi_area','Área valvular (cm²)'],['vmi_pha','PHT (ms)']
   ], extra:[['vmi_morf','Morfología',['Normal','Prolapso','Calcificación','Reumática','Prótesis']],['vmi_insuf','Insuficiencia',['','Leve','Moderada','Moderada-Severa','Severa']]],
     conditionalOn:'vmi_insuf', conditionalValue_in:['Leve','Moderada','Moderada-Severa','Severa'],
     conditionalLabel:'Cuantificación de insuficiencia mitral (ASE/ESC)',
     conditionalFields:[
       ['vmi_vc','Vena contracta (mm)'],
       ['vmi_pisa','Radio PISA (mm)'],
+      ['vmi_vmaxr','Vmax jet regurg. (m/s)'],
+      ['vmi_itvr','ITV jet regurg. (cm)'],
+      ['vmi_icvao','ITV-TSVI (cm)'],
       ['vmi_eroa','EROA (cm²)'],
       ['vmi_vreg','Volumen regurgitante (ml)'],
-      ['vmi_frreg','Fracción regurgitante (%)'],
-      ['vmi_icvmi','ITV mitral'],
-      ['vmi_icvao','ITV TSVI/Ao']
+      ['vmi_frreg','Fracción regurgitante (%)']
   ]},
   {id:'diastolica', label:'Función diastólica', express:false, fields:[
-    ['d_e','E'],['d_a','A'],['d_eseptal',"e' septal"],['d_elateral',"e' lateral"],
-    ['d_dt','Tiempo de desaceleración (DT)'],['d_ivrt','TRIV (IVRT)'],['d_vtr','Vmax TR']
+    ['d_e','E (cm/s)'],['d_a','A (cm/s)'],['d_eseptal',"e' septal (cm/s)"],['d_elateral',"e' lateral (cm/s)"],
+    ['d_dt','Tiempo de desaceleración DT (ms)'],['d_ivrt','TRIV/IVRT (ms)'],['d_vtr','Vmax TR (m/s)']
   ]},
   {id:'vd', label:'Cavidades derechas', express:false, fields:[
-    ['vd_diam','VD diámetro basal'],['vd_tapse','TAPSE'],['vd_fac','FAC'],['vd_s',"S'"],['ad_area','AD área']
+    ['vd_diam','VD diámetro basal (mm)'],['vd_tapse','TAPSE (mm)'],['vd_fac','FAC (%)'],['vd_s',"S' (cm/s)"],['ad_area','AD área (cm²)']
   ]},
   {id:'pulmonar', label:'Circulación pulmonar', express:true, fields:[
-    ['pul_psap','PSAP'],['pul_vci','VCI']
+    ['pul_psap','PSAP (mmHg)'],['pul_vci','VCI (mm)'],
+    ['pul_sv','Volumen sistólico (ml)'],['pul_co','Gasto cardíaco (L/min)']
   ]},
   {id:'vtp', label:'Tricúspide y pulmonar', express:false, fields:[], extra:[
     ['vtr_insuf','Insuf. tricuspídea',['','Leve','Moderada','Severa']],
@@ -1349,9 +1484,11 @@ const VoiceEngine = (()=>{
     rec.interimResults = true;   // resultados intermedios para actuar inmediatamente
     rec.maxAlternatives = 3;
     let done = false;
+    let commitTimer = null;
 
     function finish(val){
       if(done) return;
+      clearTimeout(commitTimer);
       done = true;
       inputEl.classList.remove('field-cont-active');
       try{ rec.stop(); }catch(e){}
@@ -1365,21 +1502,25 @@ const VoiceEngine = (()=>{
     }
 
     rec.onresult = (ev)=>{
-      // tomar el resultado más reciente
       const result = ev.results[ev.results.length-1];
       const isFinal = result.isFinal;
-      // revisar las alternativas
       for(let a=0; a<result.length; a++){
         const raw = result[a].transcript.trim();
         if(!raw) continue;
         const n = extractLeadingNumber(normalizeAccents(raw.toLowerCase()));
         if(n!==null){
-          // si es número válido, actuar inmediatamente sin esperar isFinal
-          finish(n);
+          if(isFinal){
+            // resultado final: confirmar inmediatamente
+            finish(n);
+          } else {
+            // resultado intermedio: esperar 400ms por si vienen más dígitos
+            // (evita que "ciento cincuenta" se confirme antes de escuchar "y ocho")
+            clearTimeout(commitTimer);
+            commitTimer = setTimeout(()=> finish(n), 400);
+          }
           return;
         }
         if(isFinal){
-          // si es final y no es número, colocar el texto (campos de texto libre)
           finish(raw);
           return;
         }
@@ -1988,16 +2129,37 @@ const App = (()=>{
 
   /* Campos calculados automáticamente y qué mediciones los originan */
   const AUTO_CALC_TRIGGERS = {
-    vi_fevi: ['vi_ddvi','vi_dsvi','vi_vtd','vi_vts','metodo_fevi'],
-    vi_masai: ['vi_ddvi','vi_siv','vi_pp','p_peso','p_talla'],
-    vao_area: ['tsvi_diam','tsvi_vmax','vao_vmax']
+    vi_fevi:    ['vi_ddvi','vi_dsvi','vi_vtd','vi_vts','metodo_fevi'],
+    vi_masai:   ['vi_ddvi','vi_siv','vi_pp','p_peso','p_talla'],
+    vao_area:   ['tsvi_diam','tsvi_vmax','tsvi_vtitsvi','vao_vmax','vao_vtiao'],
+    pul_psap:   ['d_vtr','pul_vci'],
+    pul_sv:     ['tsvi_diam','tsvi_vtitsvi'],
+    pul_co:     ['tsvi_diam','tsvi_vtitsvi','p_fc'],
+    vmi_area:   ['d_pht','d_dt'],
+    vmi_eroa:   ['vmi_pisa','vmi_vmaxr'],
+    vmi_vreg:   ['vmi_pisa','vmi_vmaxr','vmi_eroa','vmi_itvr'],
+    vmi_frreg:  ['vmi_pisa','vmi_vmaxr','vmi_eroa','vmi_itvr','vmi_vreg','vmi_icvao','tsvi_diam'],
+    vao_eroa:   ['vao_pisa','vao_vmaxr'],
+    vao_vreg:   ['vao_pisa','vao_vmaxr','vao_eroa','vao_itvr'],
+    vao_frreg:  ['vao_pisa','vao_vmaxr','vao_eroa','vao_itvr','vao_vreg','vao_icvt','tsvi_diam'],
   };
-  /* true = el médico editó el valor a mano; no se recalcula hasta que cambie la medición de origen */
-  let autoCalcOverrides = { vi_fevi:false, vi_masai:false, vao_area:false };
+  let autoCalcOverrides = {
+    vi_fevi:false, vi_masai:false, vao_area:false,
+    pul_psap:false, pul_sv:false, pul_co:false, vmi_area:false,
+    vmi_eroa:false, vmi_vreg:false, vmi_frreg:false,
+    vao_eroa:false, vao_vreg:false, vao_frreg:false
+  };
 
   /* Muestra el rango normal de referencia justo debajo del campo mientras se está escribiendo
      (no se guarda en ningún lado; es solo una ayuda visual momentánea). */
   function showRefHint(el){
+    /* En móvil, el scroll automático al enfocar un input puede desplazar la vista de
+       forma inesperada. Lo prevenimos guardando la posición y restaurándola. */
+    const isMobile = /iP(hone|ad|od)|Android/i.test(navigator.userAgent);
+    if(isMobile){
+      const formPane = document.querySelector('.form-pane');
+      if(formPane){ const savedScroll = formPane.scrollTop; setTimeout(()=>{ formPane.scrollTop=savedScroll; },50); }
+    }
     const field = el.dataset.field;
     const ref = ReferenceRanges.get(field, currentStudy.p_sexo);
     const hint = document.getElementById('refHint');
@@ -2076,6 +2238,35 @@ const App = (()=>{
         const el = document.getElementById('f_vao_area'); if(el) el.value = ava;
       }
     }
+    /* Auto-cálculo IM: EROA → Vreg → FR */
+    function autoFill(field, calcFn){
+      if(!autoCalcOverrides[field]){
+        const val = calcFn();
+        if(val!==null && val!==undefined){
+          currentStudy[field] = String(val);
+          const el = document.getElementById('f_'+field); if(el) el.value = val;
+        }
+      }
+    }
+    const rMI = ClinicalEngine.calcRegurg(currentStudy, 'vmi');
+    autoFill('vmi_eroa', ()=> rMI.eroa);
+    autoFill('vmi_vreg', ()=> rMI.vreg);
+    autoFill('vmi_frreg',()=> rMI.fr);
+    const rAO = ClinicalEngine.calcRegurg(currentStudy, 'vao');
+    autoFill('vao_eroa', ()=> rAO.eroa);
+    autoFill('vao_vreg', ()=> rAO.vreg);
+    autoFill('vao_frreg',()=> rAO.fr);
+
+    /* PSAP automática desde Vmax TR */
+    autoFill('pul_psap', ()=> ClinicalEngine.calcPSAP(currentStudy));
+
+    /* MVA por PHT/DT desde función diastólica (estenosis mitral) */
+    const mva = ClinicalEngine.calcMVA({d_pht: currentStudy.d_pht, d_dt: currentStudy.d_dt});
+    if(mva!==null){ autoFill('vmi_area', ()=> mva); }
+
+    /* Volumen sistólico y gasto cardíaco */
+    const svco = ClinicalEngine.calcSVCO(currentStudy);
+    if(svco){ autoFill('pul_sv', ()=> svco.sv); autoFill('pul_co', ()=> svco.co); }
   }
 
   /* Muestra/oculta los campos de cuantificación de regurgitación mitral según la severidad seleccionada */
