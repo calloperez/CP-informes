@@ -262,7 +262,7 @@ table.rp-table td.out{font-weight:700;}
   .sidebar, .form-pane, .topbar, .rp-toolbar, .empty-state,
   .voice-float, .voice-float-feed, #contDictBar, #fieldDictPanel,
   #voiceBtn, #voiceFeed, #refHint,
-  button, [id^="btnPdf"]{display:none !important;}
+  button, [id^="btnPdf"]{display:none !important;} .rp-footer > div:first-child{display:none !important;}
   .app, .main, .editor, .report-pane{display:block !important;height:auto !important;overflow:visible !important;width:100% !important;}
   .report-pane{padding:0 !important;background:#fff !important;}
   .paper{
@@ -2206,7 +2206,7 @@ const App = (()=>{
   function bindEditorEvents(patientId, studyId){
     document.getElementById('btnBack').onclick = ()=> openPatient(patientId);
     document.getElementById('btnSaveStudy').onclick = ()=> saveCurrentStudy(patientId, studyId);
-    document.getElementById('btnPdf').onclick = ()=> window.print();
+    document.getElementById('btnPdf').onclick = ()=>{ const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1); if(isIOS){ PdfService.downloadFromElement(document.getElementById('paper'), 'informe_'+(currentStudy.p_nombre||'ecocardiograma')); } else { window.print(); } };
     document.querySelectorAll('.fgroup-head').forEach(h=> h.onclick = ()=> h.parentElement.classList.toggle('open'));
     document.getElementById('btnModeFull').onclick = ()=> setExpress(false);
     document.getElementById('btnModeExpress').onclick = ()=> setExpress(true);
