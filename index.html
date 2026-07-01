@@ -286,7 +286,7 @@ table.rp-table td.out{font-weight:700;}
     <div class="patient-list" id="patientList"></div>
     <div class="sidebar-foot">
       <button class="btn" id="btnNewPatient">+ Nuevo paciente</button>
-      <div style="text-align:center;font-size:10px;color:var(--gray-3);margin-top:8px;">build 2026-06-25-r17</div>
+      <div style="text-align:center;font-size:10px;color:var(--gray-3);margin-top:8px;">build 2026-06-25-r18</div>
     </div>
   </div>
   <div class="main" id="main"></div>
@@ -450,11 +450,33 @@ const ReferenceRanges = (()=>{
     vao_vmax:     {unit:'m/s', range:()=>[1,2.5]},
     vao_gradm:    {unit:'mmHg', range:()=>[0,10]},
     vao_area:     {unit:'cm²', range:()=>[2.0,4.0]},
+    vao_vtiao:    {unit:'cm', range:()=>[18,25]},
+    tsvi_vtitsvi: {unit:'cm', range:()=>[18,25]},
+    // Insuficiencia aórtica — umbrales de severidad (ASE/ESC 2024)
+    vao_vc:       {unit:'mm', range:()=>[0,3]},      // <3 leve, 3-6 mod, >6 severa
+    vao_pht:      {unit:'ms', range:()=>[200,500]},  // <200ms severa, >500ms leve
+    vao_pisa:     {unit:'mm', range:()=>[0,6]},
+    vao_vmaxr:    {unit:'m/s', range:()=>[2,4]},
+    vao_itvr:     {unit:'cm', range:()=>[0,40]},
+    vao_icvt:     {unit:'cm', range:()=>[18,25]},
+    vao_eroa:     {unit:'cm²', range:()=>[0,0.3]},   // ≥0.3 cm² = severa
+    vao_vreg:     {unit:'ml', range:()=>[0,30]},     // ≥60 ml = severa
+    vao_frreg:    {unit:'%', range:()=>[0,30]},      // ≥50% = severa
     vmi_gradm:    {unit:'mmHg', range:()=>[0,5]},
     vmi_area:     {unit:'cm²', range:()=>[4.0,6.0]},
-    vmi_vc:       {unit:'mm', range:()=>[0,3]},
-    vmi_eroa:     {unit:'cm²', range:()=>[0,0.2]},
-    vmi_vreg:     {unit:'ml', range:()=>[0,30]},
+    vmi_pha:      {unit:'ms', range:()=>[0,150]},    // PHT: >150ms en estenosis
+    // Insuficiencia mitral — umbrales de severidad (ASE/ESC 2024)
+    vmi_vc:       {unit:'mm', range:()=>[0,3]},      // ≥7mm = severa
+    vmi_pisa:     {unit:'mm', range:()=>[0,6]},
+    vmi_vmaxr:    {unit:'m/s', range:()=>[3,6]},
+    vmi_itvr:     {unit:'cm', range:()=>[0,40]},
+    vmi_icvao:    {unit:'cm', range:()=>[18,25]},
+    vmi_eroa:     {unit:'cm²', range:()=>[0,0.2]},   // ≥0.4 cm² = severa
+    vmi_vreg:     {unit:'ml', range:()=>[0,30]},     // ≥60 ml = severa
+    vmi_frreg:    {unit:'%', range:()=>[0,30]},      // ≥50% = severa
+    // Circulación pulmonar / Doppler
+    pul_sv:       {unit:'ml', range:()=>[60,100]},
+    pul_co:       {unit:'L/min', range:()=>[4,8]},
   };
   function get(field, sex){
     const def = TABLE[field];
