@@ -286,7 +286,7 @@ table.rp-table td.out{font-weight:700;}
     <div class="patient-list" id="patientList"></div>
     <div class="sidebar-foot">
       <button class="btn" id="btnNewPatient">+ Nuevo paciente</button>
-      <div style="text-align:center;font-size:10px;color:var(--gray-3);margin-top:8px;">build 2026-06-25-r15</div>
+      <div style="text-align:center;font-size:10px;color:var(--gray-3);margin-top:8px;">build 2026-06-25-r16</div>
     </div>
   </div>
   <div class="main" id="main"></div>
@@ -733,12 +733,31 @@ const FIELD_GROUPS = [
   {id:'vao', label:'Válvula aórtica', express:true, fields:[
     ['tsvi_diam','Diámetro TSVI'],['tsvi_vmax','Vmax TSVI'],['tsvi_gradm','Gradiente TSVI'],
     ['vao_vmax','Vmax'],['vao_gradm','Gradiente medio'],['vao_area','Área valvular']
-  ], extra:[['vao_morf','Morfología',['Tricúspide','Bicúspide','Prótesis']],['vao_insuf','Insuficiencia',['','Leve','Moderada','Severa']]]},
+  ], extra:[['vao_morf','Morfología',['Tricúspide','Bicúspide','Prótesis']],['vao_insuf','Insuficiencia',['','Leve','Moderada','Moderada-Severa','Severa']]],
+    conditionalOn:'vao_insuf', conditionalValue_in:['Moderada','Moderada-Severa','Severa'],
+    conditionalLabel:'Cuantificación de insuficiencia aórtica (ASE/ESC)',
+    conditionalFields:[
+      ['vao_vc','Vena contracta (mm)'],
+      ['vao_pht','PHT — Pressure Half Time (ms)'],
+      ['vao_eroa','EROA (cm²)'],
+      ['vao_vreg','Volumen regurgitante (ml)'],
+      ['vao_frreg','Fracción regurgitante (%)'],
+      ['vao_icvt','Integral velocidad TSVI (ITV-TSVI)'],
+      ['vao_icvao','Integral velocidad Ao (ITV-Ao)']
+  ]},
   {id:'vmi', label:'Válvula mitral', express:true, fields:[
     ['vmi_gradm','Gradiente medio'],['vmi_area','Área valvular']
   ], extra:[['vmi_morf','Morfología',['Normal','Prolapso','Calcificación','Reumática','Prótesis']],['vmi_insuf','Insuficiencia',['','Leve','Moderada','Moderada-Severa','Severa']]],
-    conditionalOn:'vmi_insuf', conditionalFields:[
-      ['vmi_vc','Vena contracta'],['vmi_pisa','Radio PISA'],['vmi_eroa','EROA'],['vmi_vreg','Volumen regurgitante']
+    conditionalOn:'vmi_insuf', conditionalValue_in:['Leve','Moderada','Moderada-Severa','Severa'],
+    conditionalLabel:'Cuantificación de insuficiencia mitral (ASE/ESC)',
+    conditionalFields:[
+      ['vmi_vc','Vena contracta (mm)'],
+      ['vmi_pisa','Radio PISA (mm)'],
+      ['vmi_eroa','EROA (cm²)'],
+      ['vmi_vreg','Volumen regurgitante (ml)'],
+      ['vmi_frreg','Fracción regurgitante (%)'],
+      ['vmi_icvmi','ITV mitral'],
+      ['vmi_icvao','ITV TSVI/Ao']
   ]},
   {id:'diastolica', label:'Función diastólica', express:false, fields:[
     ['d_e','E'],['d_a','A'],['d_eseptal',"e' septal"],['d_elateral',"e' lateral"],
@@ -1315,41 +1334,73 @@ const VoiceEngine = (()=>{
   }
   /* Dictado directo en un campo específico: el médico toca el campo, habla el valor,
      y se completa sin necesidad de decir el nombre del campo. */
+  let _fieldRec = null; // referencia global para poder detenerla desde el stop
+
   function dictateIntoField(inputEl, onDone){
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if(!SR){ inputEl.focus(); return; }
-    let fieldRec = new SR();
-    fieldRec.lang = 'es-AR';
-    fieldRec.continuous = false;
-    fieldRec.interimResults = false;
-    fieldRec.maxAlternatives = 3;
-    inputEl.classList.add('field-listening');
-    fieldRec.onresult = (ev)=>{
-      /* probar las alternativas en orden hasta encontrar un número válido */
-      for(let a=0; a<ev.results[0].length; a++){
-        const raw = ev.results[0][a].transcript.trim();
+    if(!SR){ if(onDone) onDone(null); return; }
+    // detener cualquier sesión anterior
+    if(_fieldRec){ try{ _fieldRec.stop(); }catch(e){} _fieldRec=null; }
+
+    const rec = new SR();
+    _fieldRec = rec;
+    rec.lang = 'es-AR';
+    rec.continuous = false;
+    rec.interimResults = true;   // resultados intermedios para actuar inmediatamente
+    rec.maxAlternatives = 3;
+    let done = false;
+
+    function finish(val){
+      if(done) return;
+      done = true;
+      inputEl.classList.remove('field-cont-active');
+      try{ rec.stop(); }catch(e){}
+      _fieldRec = null;
+      if(val!==null){
+        inputEl.value = val;
+        inputEl.dispatchEvent(new Event('input',{bubbles:true}));
+        inputEl.dispatchEvent(new Event('change',{bubbles:true}));
+      }
+      if(onDone) onDone(val);
+    }
+
+    rec.onresult = (ev)=>{
+      // tomar el resultado más reciente
+      const result = ev.results[ev.results.length-1];
+      const isFinal = result.isFinal;
+      // revisar las alternativas
+      for(let a=0; a<result.length; a++){
+        const raw = result[a].transcript.trim();
+        if(!raw) continue;
         const n = extractLeadingNumber(normalizeAccents(raw.toLowerCase()));
         if(n!==null){
-          inputEl.value = n;
-          inputEl.dispatchEvent(new Event('input',{bubbles:true}));
-          inputEl.dispatchEvent(new Event('change',{bubbles:true}));
-          if(onDone) onDone(n);
-          break;
+          // si es número válido, actuar inmediatamente sin esperar isFinal
+          finish(n);
+          return;
         }
-        /* si no es número, colocar el texto tal cual (para campos de texto como médico/motivo) */
-        if(a===ev.results[0].length-1 && inputEl.type!=='number'){
-          inputEl.value = raw;
-          inputEl.dispatchEvent(new Event('input',{bubbles:true}));
+        if(isFinal){
+          // si es final y no es número, colocar el texto (campos de texto libre)
+          finish(raw);
+          return;
         }
       }
-      inputEl.classList.remove('field-listening');
     };
-    fieldRec.onerror = ()=>{ inputEl.classList.remove('field-listening'); };
-    fieldRec.onend  = ()=>{ inputEl.classList.remove('field-listening'); };
-    try{ fieldRec.start(); }catch(e){}
+
+    rec.onerror = (e)=>{
+      if(e.error==='aborted') return;
+      finish(null);
+    };
+    rec.onend = ()=>{ if(!done) finish(null); };
+
+    inputEl.classList.add('field-cont-active');
+    try{ rec.start(); }catch(e){ finish(null); }
   }
 
-  return { toggle, parse, dictateIntoField };
+  function stopFieldDictation(){
+    if(_fieldRec){ try{ _fieldRec.stop(); }catch(e){} _fieldRec=null; }
+  }
+
+  return { toggle, parse, dictateIntoField, stopFieldDictation };
 })();
 
 /* ---------------- PdfService ---------------- */
@@ -1880,50 +1931,52 @@ const App = (()=>{
     function setContDictText(txt, listening){
       const dot = document.getElementById('contDictDot');
       const text = document.getElementById('contDictText');
-      if(dot){ dot.className = listening ? 'listening' : ''; }
+      if(dot) dot.className = listening ? 'listening' : '';
       if(text) text.textContent = txt;
+    }
+
+    function stopContDict(){
+      contDictMode = false;
+      VoiceEngine.stopFieldDictation();
+      if(contDictField){ contDictField.classList.remove('field-cont-active'); contDictField=null; }
+      const bar = document.getElementById('contDictBar');
+      if(bar) bar.classList.remove('active');
+      const btn = document.getElementById('voiceBtn');
+      if(btn){ btn.classList.remove('on'); btn.textContent='🎙'; }
     }
 
     function startContDictOnField(inputEl){
       if(!contDictMode) return;
-      if(contDictField) contDictField.classList.remove('field-cont-active');
       contDictField = inputEl;
-      inputEl.classList.add('field-cont-active');
       const fieldName = FIELD_LABELS_BY_ID[inputEl.dataset.field] || 'Campo';
-      setContDictText('Escuchando "'+fieldName+'"...', true);
+      setContDictText('🎙 '+fieldName+'...', true);
       VoiceEngine.dictateIntoField(inputEl, (val)=>{
-        inputEl.classList.remove('field-cont-active');
-        setContDictText('✓ '+fieldName+': '+val, false);
-        readFieldsIntoStudy();
-        handleAutoCalcTrigger(inputEl.dataset.field);
-        applyConditionalVisibility();
-        renderReport();
-        /* pequeño delay y luego esperar el próximo campo */
-        setTimeout(()=>{ if(contDictMode) setContDictText('Tocá el siguiente campo', false); }, 1200);
+        if(!contDictMode) return;
+        if(val!==null){
+          setContDictText('✓ '+fieldName+': '+val, false);
+          readFieldsIntoStudy();
+          handleAutoCalcTrigger(inputEl.dataset.field);
+          applyConditionalVisibility();
+          renderReport();
+        } else {
+          setContDictText('Tocá el siguiente campo', false);
+        }
       });
     }
 
     const contStop = document.getElementById('contDictStop');
-    if(contStop) contStop.addEventListener('click', ()=>{
-      contDictMode = false;
-      if(contDictField){ contDictField.classList.remove('field-cont-active'); contDictField=null; }
-      const bar = document.getElementById('contDictBar');
-      if(bar) bar.classList.remove('active');
-    });
+    if(contStop) contStop.addEventListener('click', stopContDict);
 
-    /* El botón flotante 🎙 activa/desactiva el modo continuo */
     const voiceFloatBtn = document.getElementById('voiceBtn');
     if(voiceFloatBtn){
       voiceFloatBtn.onclick = ()=>{
-        contDictMode = !contDictMode;
-        voiceFloatBtn.classList.toggle('on', contDictMode);
-        voiceFloatBtn.textContent = contDictMode ? '⏹' : '🎙';
+        if(contDictMode){ stopContDict(); return; }
+        contDictMode = true;
+        voiceFloatBtn.classList.add('on');
+        voiceFloatBtn.textContent = '⏹';
         const bar = document.getElementById('contDictBar');
-        if(bar) bar.classList.toggle('active', contDictMode);
-        if(contDictMode) setContDictText('Tocá cualquier campo y hablá el valor', false);
-        else {
-          if(contDictField){ contDictField.classList.remove('field-cont-active'); contDictField=null; }
-        }
+        if(bar) bar.classList.add('active');
+        setContDictText('Tocá cualquier campo y hablá el valor', false);
       };
     }
 
@@ -2032,7 +2085,10 @@ const App = (()=>{
       const block = document.getElementById('cond_'+g.id);
       if(!block) return;
       const val = currentStudy[g.conditionalOn];
-      const show = g.conditionalValue ? (val===g.conditionalValue) : (val && val!=='');
+      let show;
+      if(g.conditionalValue_in) show = g.conditionalValue_in.includes(val);
+      else if(g.conditionalValue) show = val===g.conditionalValue;
+      else show = val && val!=='';
       block.style.display = show ? '' : 'none';
     });
     applyRhythmVisibility();
