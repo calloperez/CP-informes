@@ -286,7 +286,8 @@ table.rp-table td.out{font-weight:700;}
     <div class="patient-list" id="patientList"></div>
     <div class="sidebar-foot">
       <button class="btn" id="btnNewPatient">+ Nuevo paciente</button>
-      <div style="text-align:center;font-size:10px;color:var(--gray-3);margin-top:8px;">build 2026-06-25-r18</div>
+      <div id="syncStatus" style="text-align:center;font-size:10px;color:var(--gray-3);margin-top:6px;">●  En línea</div>
+      <div style="text-align:center;font-size:10px;color:var(--gray-3);margin-top:2px;">build 2026-06-25-r19</div>
     </div>
   </div>
   <div class="main" id="main"></div>
@@ -351,27 +352,113 @@ const SupabaseClient = (()=>{
 })();
 
 /* ---------------- PatientService ---------------- */
+/* ================================================================
+   CAPA OFFLINE — LocalCache
+   Lee siempre desde localStorage (instantáneo, sin red).
+   Sincroniza con Supabase en segundo plano cuando hay conexión.
+   Si no hay red: guarda localmente y sincroniza cuando vuelve.
+   ================================================================ */
+const LocalCache = (()=>{
+  const KEY_PATIENTS = 'eco_patients_v1';
+  const KEY_STUDIES  = 'eco_studies_v1';
+  const KEY_QUEUE    = 'eco_sync_queue_v1';
+
+  function loadPatients(){ try{ return JSON.parse(localStorage.getItem(KEY_PATIENTS)||'[]'); }catch(e){ return []; } }
+  function savePatients(arr){ try{ localStorage.setItem(KEY_PATIENTS, JSON.stringify(arr)); }catch(e){} }
+  function loadStudies(){ try{ return JSON.parse(localStorage.getItem(KEY_STUDIES)||'[]'); }catch(e){ return []; } }
+  function saveStudies(arr){ try{ localStorage.setItem(KEY_STUDIES, JSON.stringify(arr)); }catch(e){} }
+  function loadQueue(){ try{ return JSON.parse(localStorage.getItem(KEY_QUEUE)||'[]'); }catch(e){ return []; } }
+  function saveQueue(arr){ try{ localStorage.setItem(KEY_QUEUE, JSON.stringify(arr)); }catch(e){} }
+
+  function enqueue(op){ const q=loadQueue(); q.push({...op, ts:Date.now()}); saveQueue(q); }
+
+  function genLocalId(){ return 'local_'+Date.now()+'_'+Math.random().toString(36).slice(2); }
+
+  /* Sincroniza la cola pendiente con Supabase en segundo plano */
+  async function syncQueue(){
+    if(!navigator.onLine) return;
+    const q = loadQueue();
+    if(!q.length) return;
+    const remaining = [];
+    for(const op of q){
+      try{
+        if(op.type==='createPatient'){
+          const real = await SupabaseClient.insert('patients', op.data);
+          // reemplazar el id local por el real en el cache
+          const pts = loadPatients().map(p=> p.id===op.localId ? {...p, id:real.id} : p);
+          savePatients(pts);
+          const sts = loadStudies().map(s=> s.patientId===op.localId ? {...s, patientId:real.id} : s);
+          saveStudies(sts);
+        } else if(op.type==='updatePatient'){
+          await SupabaseClient.update('patients', op.id, op.data);
+        } else if(op.type==='deletePatient'){
+          await SupabaseClient.del('patients', op.id);
+        } else if(op.type==='createStudy'){
+          const real = await SupabaseClient.insert('studies', op.data);
+          const sts = loadStudies().map(s=> s.id===op.localId ? {...s, id:real.id} : s);
+          saveStudies(sts);
+        } else if(op.type==='updateStudy'){
+          await SupabaseClient.update('studies', op.id, op.data);
+        } else if(op.type==='deleteStudy'){
+          await SupabaseClient.del('studies', op.id);
+        }
+      }catch(e){ remaining.push(op); }
+    }
+    saveQueue(remaining);
+  }
+
+  /* Refresca el cache local desde Supabase (cuando hay señal) */
+  async function refreshFromServer(){
+    if(!navigator.onLine) return false;
+    try{
+      const pts = await SupabaseClient.select('patients','select=*&order=nombre.asc');
+      savePatients(pts);
+      return true;
+    }catch(e){ return false; }
+  }
+
+  window.addEventListener('online', ()=>{ syncQueue(); });
+
+  return { loadPatients, savePatients, loadStudies, saveStudies, enqueue, genLocalId, syncQueue, refreshFromServer };
+})();
+
 const PatientService = (()=>{
   async function list(){
-    const items = await SupabaseClient.select('patients', 'select=*&order=nombre.asc');
-    return items;
+    /* Siempre devuelve el cache local inmediatamente */
+    const local = LocalCache.loadPatients();
+    /* Refresca en segundo plano sin bloquear la UI */
+    LocalCache.refreshFromServer().then(ok=>{
+      if(ok && window._onPatientsRefreshed) window._onPatientsRefreshed();
+    });
+    return local.sort((a,b)=>(a.nombre||'').localeCompare(b.nombre||''));
   }
   async function create(data){
-    return await SupabaseClient.insert('patients', {
-      nombre: data.nombre||'', documento: data.documento||'', edad: data.edad||'', sexo: data.sexo||''
-    });
+    const localId = LocalCache.genLocalId();
+    const p = { id:localId, nombre:data.nombre||'', documento:data.documento||'', edad:data.edad||'', sexo:data.sexo||'' };
+    const pts = LocalCache.loadPatients(); pts.push(p); LocalCache.savePatients(pts);
+    LocalCache.enqueue({ type:'createPatient', localId, data:{ nombre:p.nombre, documento:p.documento, edad:p.edad, sexo:p.sexo } });
+    LocalCache.syncQueue();
+    return p;
   }
   async function update(id, data){
-    return await SupabaseClient.update('patients', id, data);
+    const pts = LocalCache.loadPatients().map(p=> p.id===id ? {...p,...data} : p);
+    LocalCache.savePatients(pts);
+    if(!id.startsWith('local_')){
+      LocalCache.enqueue({ type:'updatePatient', id, data });
+      LocalCache.syncQueue();
+    }
+    return pts.find(p=>p.id===id);
   }
   async function get(id){
-    const items = await SupabaseClient.select('patients', `select=*&id=eq.${id}`);
-    return items[0] || null;
+    return LocalCache.loadPatients().find(p=>p.id===id) || null;
   }
   async function remove(id){
-    /* La base está configurada con borrado en cascada: al borrar el paciente,
-       sus estudios se eliminan automáticamente también. */
-    await SupabaseClient.del('patients', id);
+    LocalCache.savePatients(LocalCache.loadPatients().filter(p=>p.id!==id));
+    LocalCache.saveStudies(LocalCache.loadStudies().filter(s=>s.patientId!==id));
+    if(!id.startsWith('local_')){
+      LocalCache.enqueue({ type:'deletePatient', id });
+      LocalCache.syncQueue();
+    }
   }
   return { list, create, update, get, remove };
 })();
@@ -384,30 +471,65 @@ const StudyService = (()=>{
     return { patient_id: patientId, fecha: data.fecha || null, data };
   }
   function fromRow(row){
-    return { id: row.id, patientId: row.patient_id, savedAt: row.saved_at, fecha: row.fecha, ...row.data };
+    return { id: row.id, patientId: row.patient_id, savedAt: row.saved_at||row.savedAt, fecha: row.fecha, ...row.data };
   }
-  /* Para la lista/historial solo pedimos los campos livianos (fecha, FEVI) — nunca el
-     bloque completo de "data", que puede incluir imágenes en base64 y pesar mucho en
-     redes móviles. El estudio completo (con imágenes) recién se pide al abrirlo a editar. */
   async function listByPatient(patientId){
-    const rows = await SupabaseClient.select('studies',
-      `select=id,patient_id,fecha,saved_at,data->>vi_fevi&patient_id=eq.${patientId}&order=fecha.desc`);
-    return rows.map(r=>({ id:r.id, patientId:r.patient_id, savedAt:r.saved_at, fecha:r.fecha, vi_fevi:r.vi_fevi }));
+    /* Usa el cache local — instantáneo, sin red */
+    const local = LocalCache.loadStudies()
+      .filter(s=> s.patientId===patientId)
+      .sort((a,b)=> (b.fecha||'').localeCompare(a.fecha||''));
+    /* Sincroniza en segundo plano */
+    if(navigator.onLine && !patientId.startsWith('local_')){
+      SupabaseClient.select('studies',
+        `select=id,patient_id,fecha,saved_at,data->>vi_fevi&patient_id=eq.${patientId}&order=fecha.desc`)
+      .then(rows=>{
+        const updated = rows.map(r=>({ id:r.id, patientId:r.patient_id, savedAt:r.saved_at, fecha:r.fecha, vi_fevi:r.vi_fevi }));
+        const others = LocalCache.loadStudies().filter(s=>s.patientId!==patientId);
+        LocalCache.saveStudies([...others, ...updated]);
+      }).catch(()=>{});
+    }
+    return local.map(s=>({ id:s.id, patientId:s.patientId, savedAt:s.savedAt, fecha:s.fecha, vi_fevi:s.vi_fevi }));
   }
   async function create(patientId, data){
-    const row = await SupabaseClient.insert('studies', toRow(patientId, data));
-    return fromRow(row);
+    const localId = LocalCache.genLocalId();
+    const study = { id:localId, patientId, savedAt:new Date().toISOString(), ...data };
+    const sts = LocalCache.loadStudies(); sts.push(study); LocalCache.saveStudies(sts);
+    if(!patientId.startsWith('local_')){
+      LocalCache.enqueue({ type:'createStudy', localId, data:toRow(patientId, data) });
+      LocalCache.syncQueue().then(()=>{});
+    }
+    return study;
   }
   async function update(id, data){
-    const row = await SupabaseClient.update('studies', id, { fecha: data.fecha || null, data });
-    return fromRow(row);
+    const sts = LocalCache.loadStudies().map(s=> s.id===id ? {...s,...data,savedAt:new Date().toISOString()} : s);
+    LocalCache.saveStudies(sts);
+    if(!id.startsWith('local_')){
+      LocalCache.enqueue({ type:'updateStudy', id, data:{ fecha:data.fecha||null, data } });
+      LocalCache.syncQueue().then(()=>{});
+    }
+    return sts.find(s=>s.id===id);
   }
   async function get(id){
-    const rows = await SupabaseClient.select('studies', `select=*&id=eq.${id}`);
-    return rows[0] ? fromRow(rows[0]) : null;
+    const local = LocalCache.loadStudies().find(s=>s.id===id);
+    if(local) return fromRow({...local, patient_id:local.patientId, saved_at:local.savedAt});
+    /* Si no está en cache, pide a Supabase */
+    if(navigator.onLine){
+      const rows = await SupabaseClient.select('studies', `select=*&id=eq.${id}`);
+      if(rows[0]){
+        const study = fromRow(rows[0]);
+        const sts = LocalCache.loadStudies(); sts.push({...study, patientId:study.patientId});
+        LocalCache.saveStudies(sts);
+        return study;
+      }
+    }
+    return null;
   }
   async function remove(id){
-    await SupabaseClient.del('studies', id);
+    LocalCache.saveStudies(LocalCache.loadStudies().filter(s=>s.id!==id));
+    if(!id.startsWith('local_')){
+      LocalCache.enqueue({ type:'deleteStudy', id });
+      LocalCache.syncQueue().then(()=>{});
+    }
   }
   return { listByPatient, create, update, get, remove };
 })();
@@ -1705,18 +1827,37 @@ const App = (()=>{
   let descOverride=null, conclOverride=null; // ediciones manuales
   let pendingImages=[]; // base64
 
+  /* Indicador de conexión */
+  function updateSyncStatus(){
+    const el = document.getElementById('syncStatus');
+    if(!el) return;
+    const online = navigator.onLine;
+    el.style.color = online ? '#3a7d5c' : '#B3432A';
+    el.textContent = online ? '● En línea' : '○ Sin señal — guardando local';
+  }
+  window.addEventListener('online', ()=>{ updateSyncStatus(); LocalCache.syncQueue(); });
+  window.addEventListener('offline', updateSyncStatus);
+
+  /* Cuando el cache se refresca en segundo plano, actualiza la lista silenciosamente */
+  window._onPatientsRefreshed = ()=>{
+    const updated = LocalCache.loadPatients().sort((a,b)=>(a.nombre||'').localeCompare(b.nombre||''));
+    if(JSON.stringify(updated)!==JSON.stringify(patients)){
+      patients = updated;
+      renderPatientList();
+    }
+  };
+
   /* ---------- carga inicial ---------- */
   async function init(){
-    try{
-      patients = await PatientService.list();
-      renderPatientList();
-      renderWelcome();
-    }catch(e){
-      console.error(e);
-      document.getElementById('main').innerHTML = `<div class="empty-state"><h2>No se pudo conectar con la base de datos</h2><p>${e.message}</p></div>`;
-    }
+    updateSyncStatus();
+    /* Carga instantánea desde cache local — no espera red */
+    patients = await PatientService.list();
+    renderPatientList();
+    renderWelcome();
     document.getElementById('patientSearch').oninput = renderPatientList;
     document.getElementById('btnNewPatient').onclick = createPatientFlow;
+    /* Sincronizar cola pendiente si hay conexión */
+    LocalCache.syncQueue();
   }
 
   /* Gesto "deslizar para borrar": funciona con touch (celular) y mouse (PC).
@@ -2578,6 +2719,48 @@ App.init();
 <!-- Botón flotante de dictado general -->
 <button class="voice-float" id="voiceBtn" style="display:none;" title="Dictar mediciones">🎙</button>
 <div class="voice-float-feed" id="voiceFeed"></div>
+
+<script>
+/* Service Worker inline — cachea el HTML y las librerías CDN para funcionar offline */
+if('serviceWorker' in navigator){
+  const swCode = `
+const CACHE = 'ecoinf-v19';
+const URLS = [
+  self.location.pathname,
+  'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'
+];
+self.addEventListener('install', e=>{
+  e.waitUntil(caches.open(CACHE).then(c=>c.addAll(URLS)).then(()=>self.skipWaiting()));
+});
+self.addEventListener('activate', e=>{
+  e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()));
+});
+self.addEventListener('fetch', e=>{
+  if(e.request.method!=='GET') return;
+  /* Para Supabase: network-first (datos frescos si hay red, cache si no) */
+  if(e.request.url.includes('supabase.co')){
+    e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)));
+    return;
+  }
+  /* Para todo lo demás: cache-first */
+  e.respondWith(caches.match(e.request).then(cached=>{
+    if(cached) return cached;
+    return fetch(e.request).then(resp=>{
+      if(resp && resp.status===200){
+        const clone = resp.clone();
+        caches.open(CACHE).then(c=>c.put(e.request, clone));
+      }
+      return resp;
+    }).catch(()=>cached);
+  }));
+});
+`;
+  const blob = new Blob([swCode], {type:'text/javascript'});
+  const url = URL.createObjectURL(blob);
+  navigator.serviceWorker.register(url, {scope:'/'}).catch(()=>{});
+}
+</script>
 
 </body>
 </html>
